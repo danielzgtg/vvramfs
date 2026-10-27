@@ -135,18 +135,17 @@ namespace vram {
             void sync();
 
         private:
+            static constexpr size_t MAX_FILE_SIZE = 2UL * 1024UL * 1024UL * 1024UL;
+            static_assert(MAX_FILE_SIZE % memory::block::SIZE == 0);
             // Data blocks if this entry is a file
-            std::map<off_t, memory::block_ref> file_blocks;
-
-            // Last block touched by write()
-            memory::block_ref last_written_block;
+            std::array<memory::block_ref, MAX_FILE_SIZE / memory::block::SIZE> file_blocks;
 
             // File size
             size_t _size = 0;
 
             file_t();
 
-            // Get the OpenCL buffer of the block if it exists or a nullptr
+            // Get the VRAM buffer of the block if it exists or a nullptr
             memory::block_ref get_block(off_t off) const;
 
             // Allocate new block, buf is only set on success (returning true)

@@ -14,6 +14,7 @@
 // Internal dependencies
 #include "vramfs.hpp"
 
+using namespace std;
 using namespace vram;
 
 /*
@@ -21,7 +22,7 @@ using namespace vram;
  */
 
 // Lock to prevent multiple threads from manipulating the file system index and
-// OpenCL buffers simultaneously. The tiny overhead is worth not having to deal
+// GPU buffers simultaneously. The tiny overhead is worth not having to deal
 // with the uncountable amount of race conditions that would otherwise occur.
 static std::mutex fsmutex;
 
@@ -32,7 +33,8 @@ static entry::dir_ref root_entry;
  * Initialisation
  */
 
-static void* vram_init(fuse_conn_info* conn, fuse_config*) {
+static void* vram_init(fuse_conn_info* conn, fuse_config* cfg) {
+    cfg->direct_io = true;
     root_entry = entry::dir_t::make(nullptr, "");
     root_entry->user(geteuid());
     root_entry->group(getegid());
@@ -47,7 +49,7 @@ static void* vram_init(fuse_conn_info* conn, fuse_config*) {
  */
 
 static int vram_statfs(const char*, struct statvfs* vfs) {
-    vfs->f_bsize = memory::block::size;
+    vfs->f_bsize = memory::block::SIZE;
     vfs->f_blocks = memory::pool_size();
     vfs->f_bfree = memory::pool_available();
     vfs->f_bavail = memory::pool_available();
@@ -78,7 +80,7 @@ static int vram_getattr(const char* path, struct stat* stbuf, fuse_file_info*) {
     } else if (entry->type() == entry::type::file) {
         stbuf->st_mode = S_IFREG | entry->mode();
         stbuf->st_nlink = 1;
-        stbuf->st_blksize = memory::block::size;
+        stbuf->st_blksize = memory::block::SIZE;
 
         if (entry->size() > 0) {
             stbuf->st_blocks = 1 + (entry->size() - 1) / 512; // man 2 stat
@@ -376,6 +378,7 @@ static int vram_open(const char* path, fuse_file_info* fi) {
  */
 
 static int vram_read(const char* path, char* buf, size_t size, off_t off, fuse_file_info* fi) {
+    printf("%s %lu %lu %lu\n", path, size, off, (size_t)buf & 0xfff);
     lock_guard<mutex> local_lock(fsmutex);
 
     file_session* session = reinterpret_cast<file_session*>(fi->fh);
@@ -475,21 +478,6 @@ static int print_help() {
         "K=1024, KB=1000, M=1024*1024, MB=1000*1000, G=1024*1024*1024, GB=1000*1000*1000. "
         "It's rounded up to the nearest multiple of the block size.\n"
     << std::endl;
-
-    auto devices = memory::list_devices();
-
-    if (!devices.empty()) {
-        std::cerr << "device list: \n";
-
-        for (size_t i = 0; i < devices.size(); ++i) {
-            std::cerr << "  " << i << ": " << devices[i] << "\n";
-        }
-        std::cerr << std::endl;
-    } else {
-        std::cerr << "No suitable devices found." << std::endl;
-    }
-
-
     return 1;
 }
 
@@ -524,7 +512,7 @@ int main(int argc, char* argv[]) {
     }
 
     size_t disk_size = parse_size(argv[2]);
-    bool force_allocate = (argc == 4 || argc == 6);
+    // bool force_allocate = (argc == 4 || argc == 6);
 
     if (argc == 5 || argc == 6) {
         memory::set_device(atoi(argv[4]));
@@ -535,24 +523,13 @@ int main(int argc, char* argv[]) {
         std::cerr << "failed to lock process pages in memory, vramfs may freeze if swapped" << std::endl;
     }
 
-    // Check for OpenCL supported GPU and allocate memory
+    // Check for supported GPU and allocate memory
     if (!memory::is_available()) {
-        std::cerr << "no opencl capable gpu found" << std::endl;
+        std::cerr << "no capable gpu found" << std::endl;
         return 1;
     } else {
         std::cout << "allocating vram..." << std::endl;
-
-        size_t actual_size = memory::increase_pool(disk_size);
-
-        if (actual_size < disk_size) {
-            if (force_allocate) {
-                std::cerr << "warning: only allocated " << actual_size << " bytes" << std::endl;
-            } else {
-                std::cerr << "error: could not allocate more than " << actual_size << " bytes" << std::endl;
-                std::cerr << "cleaning up..." << std::endl;
-                return 1;
-            }
-        }
+        memory::increase_pool(disk_size);
     }
 
     // Pass mount point parameter to FUSE
@@ -566,7 +543,7 @@ int main(int argc, char* argv[]) {
     // Let FUSE and the kernel deal with permissions handling
     fuse_opt_add_arg(&args, "-odefault_permissions");
 
-    // OpenCL driver acts funky if program doesn't keep running in foreground
+    // GPU driver acts funky if program doesn't keep running in foreground
     fuse_opt_add_arg(&args, "-f");
 
     return fuse_main(args.argc, args.argv, &operations, nullptr);

@@ -1,3 +1,6 @@
+#include <cstring>
+#include <ranges>
+
 #include "entry.hpp"
 #include "util.hpp"
 
@@ -41,9 +44,9 @@ namespace vram {
 
             while (off < end_pos) {
                 // Find block corresponding to current offset
-                off_t block_start = (off / memory::block::size) * memory::block::size;
+                off_t block_start = (off / memory::block::SIZE) * memory::block::SIZE;
                 off_t block_off = off - block_start;
-                size_t read_size = std::min(memory::block::size - block_off, size);
+                size_t read_size = std::min(memory::block::SIZE - block_off, size);
 
                 auto block = get_block(block_start);
 
@@ -74,9 +77,9 @@ namespace vram {
 
             while (off < end_pos) {
                 // Find block corresponding to current offset
-                off_t block_start = (off / memory::block::size) * memory::block::size;
+                off_t block_start = (off / memory::block::SIZE) * memory::block::SIZE;
                 off_t block_off = off - block_start;
-                size_t write_size = std::min(memory::block::size - block_off, size);
+                size_t write_size = std::min(memory::block::SIZE - block_off, size);
 
                 auto block = get_block(block_start);
 
@@ -88,8 +91,6 @@ namespace vram {
                 }
 
                 block->write(block_off, write_size, data, async);
-
-                last_written_block = block;
 
                 data += write_size;
                 off += write_size;
@@ -109,39 +110,34 @@ namespace vram {
         }
 
         void file_t::sync() {
-            // Waits for all asynchronous writes to finish, because they must
-            // complete before the last write does (OpenCL guarantee)
-            last_written_block->sync();
+            // Unneeded with vkMapMemory
         }
 
         memory::block_ref file_t::get_block(off_t off) const {
-            auto it = file_blocks.find(off);
-
-            if (it != file_blocks.end()) {
-                return it->second;
-            } else {
-                return nullptr;
-            }
+            off_t start_off = off / memory::block::SIZE;
+            if (start_off >= file_blocks.size()) return {};
+            return file_blocks[start_off];
         }
 
         memory::block_ref file_t::alloc_block(off_t off) {
-            auto block = memory::allocate();
-
-            if (block) {
-                file_blocks[off] = block;
-            }
-
+            off_t start_off = off / memory::block::SIZE;
+            if (start_off >= file_blocks.size()) return {};
+            if (file_blocks[start_off]) abort();
+            memory::block_ref block = memory::allocate();
+            if (block) file_blocks[start_off] = block;
             return block;
         }
 
         void file_t::free_blocks(off_t off) {
-            // Determine first block just beyond the range
-            off_t start_off = (off / memory::block::size) * memory::block::size;
-            if (off % memory::block::size != 0) start_off += memory::block::size;
-
-            for (auto it = file_blocks.find(start_off); it != file_blocks.end();) {
-                it = file_blocks.erase(it);
+            off_t start_off = off / memory::block::SIZE;
+            if (start_off >= file_blocks.size()) return;
+            size_t tail = off % memory::block::SIZE;
+            if (tail != 0) {
+                memory::block_ref &block{file_blocks[start_off]};
+                if (block) block->truncate(tail);
+                ++start_off;
             }
+            for (memory::block_ref &block : file_blocks | std::views::drop(start_off)) block.reset();
         }
     }
 }
