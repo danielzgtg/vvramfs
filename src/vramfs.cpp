@@ -4,10 +4,9 @@
 #include <unistd.h>
 
 // Standard library
-#include <iostream>
 #include <cstring>
-#include <cstdint>
-#include <limits>
+#include <filesystem>
+#include <iostream>
 #include <regex>
 #include <sys/mman.h>
 
@@ -500,6 +499,7 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    filesystem::create_directories(argv[1]);
     size_t disk_size = parse_size(argv[2]);
     // bool force_allocate = (argc == 4 || argc == 6);
 

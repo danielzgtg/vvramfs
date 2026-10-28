@@ -145,9 +145,9 @@ namespace vram {
             /// Zeroes and frees all memory with a starting offset >= *off*
             void free_blocks(size_t off, const std::unique_lock<std::shared_mutex>&);
 
-            using bmap_cb = int(&)(memory::block_ref &orig_block, size_t block_idx, size_t block_off, size_t io_size, char *data, bmap_t &userdata);
+            using bmap_cb = int(&)(memory::block_ref &orig_block, size_t block_idx, size_t block_off, size_t io_size, char *data, bmap_t &bmap_dup);
 
-            size_t bmap_walk(off_t off, size_t size, char* data, bmap_cb cb, bmap_t &userdata);
+            size_t bmap_walk(off_t off, size_t size, char* data, bmap_cb cb, bmap_t &bmap_dup);
         };
 
         // Directory entry

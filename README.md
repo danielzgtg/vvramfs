@@ -33,9 +33,7 @@ Mount a disk by running `bin/vramfs <mountdir> <size>`. The `mountdir` can be
 any empty directory. The `size` is the disk size in bytes. For more information,
 run `bin/vramfs` without arguments.
 
-The size must be a multiple of 128 MiB. The current focus is towards virtual disks
-to use for swap or to create finer-grained filesystems on. Creating many small files
-without using a nested filesystem is discouraged.
+The size must be a multiple of 128 MiB. The current focus is towards virtual disks  to use for swap or to create finer-grained filesystems on. Creating many small files without using a nested filesystem is discouraged. Resizeable BAR is also assumed.
 
 The recommended maximum size of a vramdisk is 50% of your VRAM. If you go over
 that, your driver or system may become unstable because it has to start

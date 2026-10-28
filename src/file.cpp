@@ -35,7 +35,7 @@ namespace vram {
             return 0;
         }
 
-        size_t file_t::bmap_walk(off_t off_, const size_t size, char* data, bmap_cb cb, bmap_t &userdata) {
+        size_t file_t::bmap_walk(off_t off_, const size_t size, char* data, bmap_cb cb, bmap_t &bmap_dup) {
             if (off_ < 0 || off_ > MAX_FILE_SIZE || size > MAX_IO_SIZE) return -EINVAL;
             size_t off = off_;
             const size_t end_pos = off + size;
@@ -46,20 +46,20 @@ namespace vram {
                 const size_t block_off{off % memory::block::SIZE};
                 const size_t io_size{min(memory::block::SIZE - block_off, end_pos - off)};
                 if (block_idx >= bmap.size()) abort();
-                if (cb(bmap[block_idx], block_idx, block_off, io_size, data, userdata)) break;
+                if (cb(bmap[block_idx], block_idx, block_off, io_size, data, bmap_dup)) break;
                 data += io_size;
                 off += io_size;
             }
             return off - off_;
         }
 
-        static int read_cb1(memory::block_ref &orig_block, size_t block_idx, size_t, size_t, char*, bmap_t &userdata) {
-            userdata[block_idx] = orig_block;
+        static int read_cb1(memory::block_ref &orig_block, size_t block_idx, size_t, size_t, char*, bmap_t &bmap_dup) {
+            bmap_dup[block_idx] = orig_block;
             return 0;
         }
 
-        static int read_cb2(memory::block_ref &, size_t block_idx, size_t block_off, size_t io_size, char* data, bmap_t &userdata) {
-            memory::block_ref &block = userdata[block_idx];
+        static int read_cb2(memory::block_ref &, size_t block_idx, size_t block_off, size_t io_size, char* data, bmap_t &bmap_dup) {
+            memory::block_ref &block = bmap_dup[block_idx];
             if (block) {
                 block->read(block_off, io_size, data);
             } else {
@@ -82,18 +82,18 @@ namespace vram {
             return size;
         }
 
-        static int write_cb1(memory::block_ref &orig_block, size_t block_idx, size_t, size_t, char*, bmap_t &userdata) {
+        static int write_cb1(memory::block_ref &orig_block, size_t block_idx, size_t, size_t, char*, bmap_t &bmap_dup) {
             if (!orig_block) {
                 orig_block = memory::allocate();
                 if (!orig_block) return -ENOSPC;
             }
-            userdata[block_idx] = orig_block;
+            bmap_dup[block_idx] = orig_block;
             return 0;
         }
 
-        static int write_cb2(memory::block_ref &, size_t block_idx, size_t block_off, size_t io_size, char* data_, bmap_t &userdata) {
+        static int write_cb2(memory::block_ref &, size_t block_idx, size_t block_off, size_t io_size, char* data_, bmap_t &bmap_dup) {
             const char *data{data_};
-            memory::block_ref &block = userdata[block_idx];
+            memory::block_ref &block = bmap_dup[block_idx];
             if (!block) abort();
             block->write(block_off, io_size, data);
             return 0;
