@@ -57,7 +57,7 @@ namespace vram {
             vkGetPhysicalDeviceMemoryProperties(physical_device, &memory_properties);
             device_memory_type = ~uint32_t{};
             for (auto [i, memory_type] : memory_properties.memoryTypes | views::as_const | views::take(memory_properties.memoryTypeCount) | views::enumerate) {
-                if (~memory_type.propertyFlags & (VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)) continue;
+                if (~memory_type.propertyFlags & (VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) continue;
                 device_memory_type = i;
                 break;
             }
@@ -122,12 +122,12 @@ namespace vram {
             pool.push_back(buffer);
         }
 
-        void block::read(off_t offset, size_t size, void* data) const {
+        void block::read(size_t offset, size_t size, void* data) const {
             if (offset > SIZE || size > SIZE || offset + size > SIZE) abort();
             memcpy(data, static_cast<char*>(buffer) + offset, size);
         }
 
-        void block::write(off_t offset, size_t size, const void* data, bool _async) {
+        void block::write(size_t offset, size_t size, const void* data) {
             if (offset > SIZE || size > SIZE || offset + size > SIZE) abort();
             memcpy(static_cast<char *>(buffer) + offset, data, size);
         }

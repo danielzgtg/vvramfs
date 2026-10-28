@@ -1,9 +1,11 @@
+#include <atomic>
+
 #include "entry.hpp"
 #include "util.hpp"
 
 namespace vram {
     namespace entry {
-        int entry_count = 0;
+        std::atomic_int entry_count = 0;
 
         int count() {
             return entry_count;
@@ -16,25 +18,21 @@ namespace vram {
             _mtime = t;
             _ctime = t;
 
-            entry_count++;
+            ++entry_count;
         }
 
         entry_t::~entry_t() {
-            entry_count--;
+            --entry_count;
         }
 
         void entry_t::link(dir_ptr parent, const string& name) {
             _parent = parent;
             _name = name;
-
             if (parent) {
                 parent->_children[name] = shared_from_this();
                 parent->mtime(util::time());
             }
-        }
-
-        dir_ptr entry_t::parent() const {
-            return _parent;
+            ctime(util::time());
         }
 
         const string& entry_t::name() const {
@@ -98,22 +96,13 @@ namespace vram {
             if (_parent) {
                 _parent->_children.erase(_name);
                 _parent->mtime(util::time());
+                _parent = nullptr;
             }
         }
 
         void entry_t::move(dir_ptr new_parent, const string& new_name) {
-            if (_parent) {
-                _parent->_children.erase(_name);
-                _parent->mtime(util::time());
-            }
-
-            _parent = new_parent;
-            _name = new_name;
-
-            ctime(util::time());
-
-            new_parent->_children[new_name] = shared_from_this();
-            new_parent->mtime(util::time());
+            unlink();
+            link(new_parent, new_name);
         }
     }
 }

@@ -39,10 +39,9 @@ namespace vram {
 
             ~block();
 
-            void read(off_t offset, size_t size, void* data) const;
+            void read(size_t offset, size_t size, void* data) const;
 
-            // Data may be freed afterwards, even if called with async = true
-            void write(off_t offset, size_t size, const void* data, bool async = false);
+            void write(size_t offset, size_t size, const void* data);
 
             void truncate(size_t size);
 

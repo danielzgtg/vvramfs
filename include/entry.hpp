@@ -8,7 +8,7 @@
 #include <string>
 #include <memory>
 #include <mutex>
-#include <map>
+#include <shared_mutex>
 #include <unordered_map>
 
 #include "memory.hpp"
@@ -54,8 +54,6 @@ namespace vram {
         class entry_t : public std::enable_shared_from_this<entry_t> {
         public:
             entry_t(const entry_t& other) = delete;
-
-            dir_ptr parent() const;
 
             const string& name() const;
 
@@ -109,50 +107,47 @@ namespace vram {
             timespec _ctime;
         };
 
+        static constexpr size_t MAX_FILE_SIZE = 2UL * 1024UL * 1024UL * 1024UL;
+        static_assert(MAX_FILE_SIZE % memory::block::SIZE == 0);
+        using bmap_t = std::array<memory::block_ref, MAX_FILE_SIZE / memory::block::SIZE>;
+        static constexpr size_t MAX_IO_SIZE = 1024UL * 1024UL;
+        static_assert(MAX_IO_SIZE < MAX_FILE_SIZE);
+
         // File entry
         class file_t : public entry_t {
         public:
             // Constructor that takes care of memory management
             static file_ref make(dir_ptr parent, const string& name);
 
-            type::type_t type() const;
+            type::type_t type() const override;
 
-            size_t size() const;
+            size_t size() const override;
 
             // Blocks beyond the new file size are immediately deallocated
-            void size(size_t new_size);
+            int size(size_t new_size);
 
             // Read data from file, returns total bytes read <= size
-            //
-            // The specified mutex is unlocked while blocking to read, because
-            // that's a non-critical section.
-            int read(off_t off, size_t size, char* data, std::mutex& wait_mutex);
+            int read(off_t off, size_t size, char* data);
 
             // Write data to file, returns -error or total bytes written
-            int write(off_t off, size_t size, const char* data, bool async = true);
-
-            // Sync writes to file
-            void sync();
+            int write(off_t off, size_t size, const char* data);
 
         private:
-            static constexpr size_t MAX_FILE_SIZE = 2UL * 1024UL * 1024UL * 1024UL;
-            static_assert(MAX_FILE_SIZE % memory::block::SIZE == 0);
-            // Data blocks if this entry is a file
-            std::array<memory::block_ref, MAX_FILE_SIZE / memory::block::SIZE> file_blocks;
+            /// Data blocks since this entry is a file
+            bmap_t bmap;
+            std::shared_mutex rwlock;
 
             // File size
             size_t _size = 0;
 
             file_t();
 
-            // Get the VRAM buffer of the block if it exists or a nullptr
-            memory::block_ref get_block(off_t off) const;
+            /// Zeroes and frees all memory with a starting offset >= *off*
+            void free_blocks(size_t off, const std::unique_lock<std::shared_mutex>&);
 
-            // Allocate new block, buf is only set on success (returning true)
-            memory::block_ref alloc_block(off_t off);
+            using bmap_cb = int(&)(memory::block_ref &orig_block, size_t block_idx, size_t block_off, size_t io_size, char *data, bmap_t &userdata);
 
-            // Delete all blocks with a starting offset >= *off*
-            void free_blocks(off_t off = 0);
+            size_t bmap_walk(off_t off, size_t size, char* data, bmap_cb cb, bmap_t &userdata);
         };
 
         // Directory entry
@@ -163,10 +158,10 @@ namespace vram {
             // Constructor that takes care of memory management
             static dir_ref make(dir_ptr parent, const string& name);
 
-            type::type_t type() const;
+            type::type_t type() const override;
 
             // Always returns size of 4096
-            size_t size() const;
+            size_t size() const override;
 
             // Not const, because it changes access time
             const std::unordered_map<string, entry_ref> children();
@@ -190,9 +185,9 @@ namespace vram {
             // Constructor that takes care of memory management
             static symlink_ref make(dir_ptr parent, const string& name, const string& target);
 
-            type::type_t type() const;
+            type::type_t type() const override;
 
-            size_t size() const;
+            size_t size() const override;
 
         private:
             symlink_t(const string& target);

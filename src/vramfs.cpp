@@ -378,11 +378,9 @@ static int vram_open(const char* path, fuse_file_info* fi) {
  */
 
 static int vram_read(const char* path, char* buf, size_t size, off_t off, fuse_file_info* fi) {
-    printf("%s %lu %lu %lu\n", path, size, off, (size_t)buf & 0xfff);
-    lock_guard<mutex> local_lock(fsmutex);
-
-    file_session* session = reinterpret_cast<file_session*>(fi->fh);
-    return session->file->read(off, size, buf, fsmutex);
+    // printf("%s %lu %lu %lu\n", path, size, off, (size_t)buf & 0xfff);
+    entry::file_ref file{reinterpret_cast<file_session*>(fi->fh)->file};
+    return file->read(off, size, buf);
 }
 
 /*
@@ -390,10 +388,8 @@ static int vram_read(const char* path, char* buf, size_t size, off_t off, fuse_f
  */
 
 static int vram_write(const char* path, const char* buf, size_t size, off_t off, fuse_file_info* fi) {
-    lock_guard<mutex> local_lock(fsmutex);
-
-    file_session* session = reinterpret_cast<file_session*>(fi->fh);
-    return session->file->write(off, size, buf);
+    entry::file_ref file{reinterpret_cast<file_session*>(fi->fh)->file};
+    return file->write(off, size, buf);
 }
 
 /*
@@ -401,11 +397,7 @@ static int vram_write(const char* path, const char* buf, size_t size, off_t off,
  */
 
 static int vram_fsync(const char* path, int, fuse_file_info* fi) {
-    lock_guard<mutex> local_lock(fsmutex);
-
-    file_session* session = reinterpret_cast<file_session*>(fi->fh);
-    session->file->sync();
-
+    // Unneeded with VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
     return 0;
 }
 
@@ -414,10 +406,10 @@ static int vram_fsync(const char* path, int, fuse_file_info* fi) {
  */
 
 static int vram_release(const char* path, fuse_file_info* fi) {
-    lock_guard<mutex> local_lock(fsmutex);
-
+    // Although I worry about a race between release() and read()/write(),
+    // the previously-here lock_guard wouldn't've prevented all instances of it
     delete reinterpret_cast<file_session*>(fi->fh);
-
+    fi->fh = 0;
     return 0;
 }
 
@@ -426,46 +418,43 @@ static int vram_release(const char* path, fuse_file_info* fi) {
  */
 
 static int vram_truncate(const char* path, off_t size, fuse_file_info*) {
-    lock_guard<mutex> local_lock(fsmutex);
-
-    entry::entry_ref entry;
-    int err = root_entry->find(path, entry, entry::type::file);
-    if (err != 0) return err;
-    auto file = dynamic_pointer_cast<entry::file_t>(entry);
-
-    file->size(size);
-
-    return 0;
+    entry::file_ref file;
+    {
+        lock_guard<mutex> local_lock(fsmutex);
+        entry::entry_ref entry;
+        int err = root_entry->find(path, entry, entry::type::file);
+        if (err != 0) return err;
+        file = dynamic_pointer_cast<entry::file_t>(entry);
+    }
+    return file->size(size);
 }
 
 /*
  * FUSE setup
  */
 
-static struct vram_operations : fuse_operations {
-    vram_operations() {
-        init = vram_init;
-        statfs = vram_statfs;
-        getattr = vram_getattr;
-        readlink = vram_readlink;
-        utimens = vram_utimens;
-        chmod = vram_chmod;
-        chown = vram_chown;
-        readdir = vram_readdir;
-        create = vram_create;
-        mkdir = vram_mkdir;
-        symlink = vram_symlink;
-        unlink = vram_unlink;
-        rmdir = vram_rmdir;
-        rename = vram_rename;
-        open = vram_open;
-        read = vram_read;
-        write = vram_write;
-        fsync = vram_fsync;
-        release = vram_release;
-        truncate = vram_truncate;
-    }
-} operations;
+static constexpr fuse_operations operations{
+    .getattr = vram_getattr,
+    .readlink = vram_readlink,
+    .mkdir = vram_mkdir,
+    .unlink = vram_unlink,
+    .rmdir = vram_rmdir,
+    .symlink = vram_symlink,
+    .rename = vram_rename,
+    .chmod = vram_chmod,
+    .chown = vram_chown,
+    .truncate = vram_truncate,
+    .open = vram_open,
+    .read = vram_read,
+    .write = vram_write,
+    .statfs = vram_statfs,
+    .release = vram_release,
+    .fsync = vram_fsync,
+    .readdir = vram_readdir,
+    .init = vram_init,
+    .create = vram_create,
+    .utimens = vram_utimens,
+};
 
 static int print_help() {
     std::cerr <<
