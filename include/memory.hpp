@@ -8,6 +8,7 @@
 namespace vram {
     namespace memory {
         class block;
+        struct vram_buffer;
         typedef std::shared_ptr<block> block_ref;
 
         // Check if current machine supports VRAM allocation
@@ -46,7 +47,7 @@ namespace vram {
             void truncate(size_t size);
 
         private:
-            void *buffer;
+            vram_buffer *buffer;
             block();
         };
     }
