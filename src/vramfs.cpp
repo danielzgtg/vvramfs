@@ -1,27 +1,27 @@
 #define FUSE_USE_VERSION 30
-#include <fuse.h>
-#include <unistd.h>
-
 #include <cstring>
 #include <filesystem>
+#include <fuse.h>
 #include <iostream>
-#include <sys/mman.h>
-#include "vramfs.hpp"
-
 #include <ranges>
+#include <sys/mman.h>
+#include <unistd.h>
+
+#include "vramfs.hpp"
+#include "util.hpp"
 
 using namespace std;
 using namespace vram;
 using enum entry::type_t;
 
-// File system root that links to the rest
+/// File system root that links to the rest
 static shared_ptr<entry::dir_t> root_entry;
 
 static void* vram_init(fuse_conn_info* conn, fuse_config* cfg) {
     cfg->direct_io = true;
     root_entry = entry::dir_t::make(nullptr, "");
     root_entry->chown(geteuid(), getegid());
-    std::cout << "mounted." << std::endl;
+    cout << "mounted." << endl;
     return nullptr;
 }
 
@@ -69,6 +69,7 @@ static int vram_readlink(const char* path, char* buf, size_t size) {
     int err = root_entry->find(path, entry, TYPE_SYMLINK);
     if (err != 0) return err;
     auto symlink = dynamic_pointer_cast<entry::symlink_t>(entry);
+    // TODO atime
     strncpy(buf, symlink->target.c_str(), size);
     return 0;
 }
@@ -277,16 +278,17 @@ static constexpr fuse_operations operations{
 };
 
 static int print_help() {
-    std::cerr <<
-        "usage: vramfs <mountdir> <size> [-d <device>] [-f]\n\n"
-        "  mountdir    - directory to mount file system, must be empty\n"
-        "  size        - size of the disk in bytes\n"
-        "  -d <device> - specifies identifier of device to use\n"
-        "  -f          - flag that forces mounting, with a smaller size if needed\n\n"
-        "The size may be followed by one of the following multiplicative suffixes: "
-        "K=1024, KB=1000, M=1024*1024, MB=1000*1000, G=1024*1024*1024, GB=1000*1000*1000. "
-        "It's rounded up to the nearest multiple of the block size.\n"
-    << std::endl;
+    cerr << R"(usage: vvramfs <mountdir> <size> [-d <device>] [-f]
+
+  mountdir    - directory to mount file system, must be empty
+  size        - size of the disk in bytes
+  -d <device> - specifies identifier of device to use
+  -f          - flag that forces mounting, with a smaller size if needed
+
+The size may be followed by one of the following multiplicative suffixes:
+K=1024, KB=1000, M=1024*1024, MB=1000*1000, G=1024*1024*1024, GB=1000*1000*1000.
+It's rounded up to the nearest multiple of the block size.
+)";
     return 1;
 }
 
@@ -314,7 +316,7 @@ int main(int argc, char* argv[]) {
     if (argc == 5 || argc == 6) memory::device_num = atoi(argv[4]);
     if (mlockall(MCL_CURRENT | MCL_FUTURE)) cerr << "failed to lock process pages in memory, vramfs may freeze if swapped" << endl;
     cout << "allocating vram..." << endl;
-    memory::init_gpu(disk_size);
+    memory::gpu_init(disk_size);
     fuse_args args = FUSE_ARGS_INIT(2, argv);
     fuse_opt_parse(&args, nullptr, nullptr, nullptr);
     fuse_opt_add_arg(&args, "-oauto_unmount"); // Properly unmount even on crash

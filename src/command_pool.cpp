@@ -1,5 +1,3 @@
-#include <atomic>
-#include <vector>
 #include <vulkan/vulkan.h>
 
 #include "memory_vulkan.hpp"

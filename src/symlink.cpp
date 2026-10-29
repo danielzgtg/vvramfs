@@ -1,6 +1,8 @@
 #include "entry.hpp"
 #include "util.hpp"
 
+using namespace std;
+
 namespace vram::entry {
 shared_ptr<symlink_t> symlink_t::make(dir_t* parent, const string& name, const string& target) {
     auto symlink = shared_ptr<symlink_t>(new symlink_t(target));

@@ -1,5 +1,7 @@
 #include "util.hpp"
 
+using namespace std;
+
 namespace vram::util {
 timespec time() {
     timespec tv{};
