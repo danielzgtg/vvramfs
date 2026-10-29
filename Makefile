@@ -10,7 +10,7 @@ CXXFLAGS += -g
 .PHONY: all
 all: bin/vramfs
 
-bin/vramfs: build/util.o build/memory.o build/entry.o build/file.o build/dir.o build/symlink.o build/vramfs.o | bin
+bin/vramfs: build/command_pool.o build/dir.o build/entry.o build/file.o build/memory.o build/symlink.o build/util.o build/vramfs.o | bin
 	$(CXX) -o $@ $^ $(LDFLAGS)
 
 build bin:

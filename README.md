@@ -16,7 +16,7 @@ vvramfs ports https://github.com/Overv/vramfs from OpenCL to Vulkan. Writing thi
 
 - Linux, preferably 7.0+
 - libfuse3-dev
-- A graphics card with support for Vulkan 1.0
+- A graphics card with support for Vulkan 1.2
 
 #### Building
 

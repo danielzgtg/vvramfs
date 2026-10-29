@@ -1,9 +1,8 @@
 #include <cstring>
 #include <ranges>
 #include <vector>
-#include <vulkan/vulkan.h>
 
-#include "memory.hpp"
+#include "memory_vulkan.hpp"
 
 using namespace std;
 
@@ -19,6 +18,12 @@ namespace vram {
         VkQueue transfer_queue;
         uint32_t device_memory_type;
         uint32_t host_memory_type;
+        VkSemaphore timeline_semaphore;
+
+        VkCommandPoolCreateInfo pool_create_info{
+            .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+            .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
+        };
 
         vector<vram_buffer *> pool;
         mutex pool_lock{};
@@ -33,7 +38,7 @@ namespace vram {
                 .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
                 .pApplicationName = "vvramfs",
                 .applicationVersion = VK_MAKE_VERSION(1, 0, 0),
-                .apiVersion = VK_API_VERSION_1_0,
+                .apiVersion = VK_API_VERSION_1_2,
             };
             static const VkInstanceCreateInfo instance_create_info {
                 .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
@@ -77,8 +82,14 @@ namespace vram {
                 .queueCount = 1,
                 .pQueuePriorities = &ONE,
             };
+            pool_create_info.queueFamilyIndex = transfer_family;
+            VkPhysicalDeviceVulkan12Features vulkan12_features {
+                .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+                .timelineSemaphore = VK_TRUE,
+            };
             const VkDeviceCreateInfo device_create_info {
                 .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+                .pNext = &vulkan12_features,
                 .queueCreateInfoCount = 1,
                 .pQueueCreateInfos = &queue_create_info,
             };
@@ -100,6 +111,15 @@ namespace vram {
                 break;
             }
             if (!~host_memory_type) abort();
+            static constexpr VkSemaphoreTypeCreateInfo semaphore_type_create_info{
+                .sType =  VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
+                .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE,
+            };
+            static constexpr VkSemaphoreCreateInfo semaphore_create_info{
+                .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+                .pNext = &semaphore_type_create_info,
+            };
+            if (vkCreateSemaphore(vk_device, &semaphore_create_info, nullptr, &timeline_semaphore) != VK_SUCCESS) abort();
         }
 
         bool is_available() {
@@ -146,11 +166,11 @@ namespace vram {
                 if (vkAllocateMemory(vk_device, &memory_allocate_info, nullptr, &device_memory) != VK_SUCCESS) abort();
                 if (vkMapMemory(vk_device, device_memory, 0, block::SIZE, 0, &buf) != VK_SUCCESS) abort();
                 vkBindBufferMemory(vk_device, vk_buffer, device_memory, 0);
+                clear_buffer(vk_buffer, 0, block::SIZE);
 #else
                 vk_buffer = nullptr;
-                buf = malloc(block::SIZE);
+                buf = calloc(1, block::SIZE);
 #endif
-                memset(buf, 0, block::SIZE);
                 pool.push_back(new vram_buffer {
                     .mmap = buf,
                     .vk = vk_buffer,
@@ -189,7 +209,12 @@ namespace vram {
 
         void block::truncate(size_t size) {
             if (size > SIZE) abort();
-            memset(static_cast<char *>(buffer->mmap) + size, 0, SIZE - size);
+            size_t size_vk{SIZE};
+            if (buffer->vk) {
+                size_vk = size & 3 ? (size & ~3) + 4 : size;
+                clear_buffer(buffer->vk, size_vk, SIZE - size_vk);
+            }
+            memset(static_cast<char *>(buffer->mmap) + size, 0, size_vk - size);
         }
     }
 }
