@@ -366,6 +366,7 @@ static int vram_open(const char* path, fuse_file_info* fi) {
     int err = root_entry->find(path, entry, entry::type::file);
     if (err != 0) return err;
     auto file = dynamic_pointer_cast<entry::file_t>(entry);
+    if (fi->flags & O_TRUNC && fi->flags & (O_WRONLY | O_RDWR)) file->size(0);
 
     fi->fh = reinterpret_cast<uint64_t>(new file_session(file));
 
