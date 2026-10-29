@@ -130,4 +130,16 @@ void clear_buffer(VkBuffer buffer, size_t offset, size_t size) {
     command_recording recording{lease};
     vkCmdFillBuffer(*recording, buffer, offset, size, 0);
 }
+
+void copy_buffer(VkBuffer src, VkBuffer dst, size_t src_offest, size_t dst_offset, size_t size) {
+    if (!size) return;
+    command_pool_lease lease{};
+    command_recording recording{lease};
+    const VkBufferCopy copy {
+        .srcOffset = src_offest,
+        .dstOffset = dst_offset,
+        .size = size,
+    };
+    vkCmdCopyBuffer(*recording, src, dst, 1, &copy);
+}
 }

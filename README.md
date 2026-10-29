@@ -71,7 +71,7 @@ buffers is created and initialised with zeros. That is not just a good practice,
 but it's also required with some Vulkan drivers to check if the VRAM required
 for the block is actually available.
 
-To avoid dealing with creating queues and synchronizing copies, we just uncached-mmap GPU VRAM onto the host then `memcpy` as if it was regular RAM. GPU hotplug/loss shall be undefined behavior.
+To copy CPU–GPU, we use the fast way of uncached-mmap GPU VRAM onto the host then `memcpy` as if it was regular RAM, nicely avoiding dealing with creating queues and synchronizing copies. GPU hotplug/loss shall be undefined behavior. To copy GPU–CPU, `memcpy` is painfully slow, so we needed to actually keep using Vulkan and task the GPU's DMA engines. The big picture is that the writer, i.e. whichever side is the data's origin, should "push" the data contiguously, not having the reader "pull" it piece by piece.
 
 Block objects are managed using a `shared_ptr` so that they can automatically
 reinsert themselves into the pool on deconstruction.
@@ -122,10 +122,13 @@ The system used for testing has the following specifications:
 
 Performance has been measured:
 
-* `dd if=/dev/zero of=/tmp/vram/test bs=1M count=1024 oflag=dsync`: 3.7 GB/s
+* `dd if=/dev/zero of=/tmp/vram/test bs=1M count=1024 oflag=dsync`
+    * Existing files: 4.3 GB/s
+    * First launch: 724 MB/s
 * `dd if=/tmp/test of=/tmp/vram/test bs=1M count=1024 oflag=dsync`: 1.9 GB/s
 * `dd if=/dev/urandom of=/tmp/vram/test bs=1M count=1024 oflag=dsync`: 429 MB/s
-* `dd if=/tmp/vram/test of=/dev/null bs=1M count=1024 oflag=dsync`: 30 MB/s (TODO FIXME)
+* `dd if=/tmp/vram/test of=/dev/null bs=1M count=1024 oflag=dsync`: 2.2 GB/s
+    * This fluctuates still, and I aim to reach the original vramfs's 2.4 GB/s
 
 Regular ramdisk comparison:
 
