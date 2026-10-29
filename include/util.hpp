@@ -8,5 +8,5 @@ namespace vram::util {
 timespec time();
 
 /// Split path/to/file.txt into "path/to" and "file.txt"
-void split_file_path(const std::string& path, std::string& dir, std::string& file);
+void split_file_path(const std::string &path, std::string &dir, std::string &file);
 }

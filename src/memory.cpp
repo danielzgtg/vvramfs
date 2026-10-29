@@ -54,14 +54,17 @@ void block::read(size_t offset, size_t size, void *data) const {
         return;
     }
     lock_guard page_mmap_lock{page_mmap_mutex};
-    const char *const data_addr{static_cast<char *>(data)};
-    const auto vk_page_mmap_start = reinterpret_cast<char *>(reinterpret_cast<uintptr_t>(data) & PAGE_MASK);
-    const auto vk_page_mmap_end = reinterpret_cast<char *>(reinterpret_cast<uintptr_t>(data) + size + ~PAGE_MASK & PAGE_MASK);
+    const char *const data_addr{static_cast<char*>(data)};
+    const auto vk_page_mmap_start = reinterpret_cast<char*>(reinterpret_cast<uintptr_t>(data) & PAGE_MASK);
+    const auto vk_page_mmap_end = reinterpret_cast<char*>(reinterpret_cast<uintptr_t>(data) + size + ~PAGE_MASK &
+        PAGE_MASK);
     const size_t vk_page_mmap_size = vk_page_mmap_end - vk_page_mmap_start;
     VkMemoryHostPointerPropertiesEXT host_pointer_properties_ext{
         .sType = VK_STRUCTURE_TYPE_MEMORY_HOST_POINTER_PROPERTIES_EXT,
     };
-    if (pfn_vk_get_memory_host_pointer_properties_ext(vk_device, VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT, vk_page_mmap_start, &host_pointer_properties_ext) != VK_SUCCESS) abort();
+    if (pfn_vk_get_memory_host_pointer_properties_ext(vk_device, VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT,
+                                                      vk_page_mmap_start,
+                                                      &host_pointer_properties_ext) != VK_SUCCESS) abort();
     if (~host_pointer_properties_ext.memoryTypeBits & (1 << host_memory_type)) abort();
     static constexpr VkExternalMemoryBufferCreateInfo external_memory_buffer_create_info{
         .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO,
@@ -78,13 +81,14 @@ void block::read(size_t offset, size_t size, void *data) const {
     if (vkCreateBuffer(vk_device, &create_info, nullptr, &dst_buffer) != VK_SUCCESS) abort();
     VkMemoryRequirements memory_requirements;
     vkGetBufferMemoryRequirements(vk_device, dst_buffer, &memory_requirements);
-    if (memory_requirements.size != vk_page_mmap_size || memory_requirements.alignment > PAGE_SIZE || ~memory_requirements.memoryTypeBits & (1 << host_memory_type)) abort();
+    if (memory_requirements.size != vk_page_mmap_size || memory_requirements.alignment > PAGE_SIZE || ~
+        memory_requirements.memoryTypeBits & (1 << host_memory_type)) abort();
     const VkImportMemoryHostPointerInfoEXT host_pointer_info_ext{
         .sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_HOST_POINTER_INFO_EXT,
         .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT,
         .pHostPointer = vk_page_mmap_start,
     };
-    const VkMemoryAllocateInfo memory_allocate_info {
+    const VkMemoryAllocateInfo memory_allocate_info{
         .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
         .pNext = &host_pointer_info_ext,
         .allocationSize = vk_page_mmap_size,
@@ -98,9 +102,9 @@ void block::read(size_t offset, size_t size, void *data) const {
     vkDestroyBuffer(vk_device, dst_buffer, nullptr);
 }
 
-void block::write(size_t offset, size_t size, const void* data) {
+void block::write(size_t offset, size_t size, const void *data) {
     if (offset > SIZE || size > SIZE || offset + size > SIZE) abort();
-    memcpy(static_cast<char *>(buffer->mmap) + offset, data, size);
+    memcpy(static_cast<char*>(buffer->mmap) + offset, data, size);
 }
 
 void block::truncate(size_t size) {
@@ -110,6 +114,6 @@ void block::truncate(size_t size) {
         size_vk = size & 3 ? (size & ~3) + 4 : size;
         clear_buffer(buffer->vk, size_vk, SIZE - size_vk);
     }
-    memset(static_cast<char *>(buffer->mmap) + size, 0, size_vk - size);
+    memset(static_cast<char*>(buffer->mmap) + size, 0, size_vk - size);
 }
 }

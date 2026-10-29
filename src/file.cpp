@@ -7,7 +7,7 @@
 using namespace std;
 
 namespace vram::entry {
-shared_ptr<file_t> file_t::make(dir_t* parent, const string& name) {
+shared_ptr<file_t> file_t::make(dir_t *parent, const string &name) {
     auto file = shared_ptr<file_t>(new file_t());
     file->link(parent, name);
     return file;
@@ -15,7 +15,7 @@ shared_ptr<file_t> file_t::make(dir_t* parent, const string& name) {
 
 file_t::file_t() : entry_t{TYPE_FILE, 0, 0644} {}
 
-int file_t::size(size_t new_size) {
+int file_t::truncate(size_t new_size) {
     if (new_size > MAX_FILE_SIZE) return -EINVAL;
     const unique_lock lock{bmap_rwlock};
     if (new_size < _size.load(memory_order_relaxed)) free_blocks(new_size, lock);
@@ -24,7 +24,7 @@ int file_t::size(size_t new_size) {
     return 0;
 }
 
-size_t file_t::bmap_walk(off_t off_, const size_t size, char* data, bmap_cb cb, bmap_t &bmap_dup) {
+size_t file_t::bmap_walk(off_t off_, const size_t size, char *data, bmap_cb cb, bmap_t &bmap_dup) {
     if (off_ < 0 || off_ > MAX_FILE_SIZE || size > MAX_IO_SIZE) return -EINVAL;
     size_t off = off_;
     const size_t end_pos = off + size;
@@ -42,13 +42,13 @@ size_t file_t::bmap_walk(off_t off_, const size_t size, char* data, bmap_cb cb, 
     return off - off_;
 }
 
-static int read_cb1(shared_ptr<memory::block>& orig_block, size_t block_idx, size_t, size_t, char*, bmap_t &bmap_dup) {
+static int read_cb1(shared_ptr<memory::block> &orig_block, size_t block_idx, size_t, size_t, char *, bmap_t &bmap_dup) {
     bmap_dup[block_idx] = orig_block;
     return 0;
 }
 
-static int read_cb2(shared_ptr<memory::block>&, size_t block_idx, size_t block_off, size_t io_size, char* data, bmap_t &bmap_dup) {
-    shared_ptr<memory::block>& block = bmap_dup[block_idx];
+static int read_cb2(shared_ptr<memory::block> &, size_t block_idx, size_t block_off, size_t io_size, char *data, bmap_t &bmap_dup) {
+    shared_ptr<memory::block> &block = bmap_dup[block_idx];
     if (block) {
         block->read(block_off, io_size, data);
     } else {
@@ -58,9 +58,9 @@ static int read_cb2(shared_ptr<memory::block>&, size_t block_idx, size_t block_o
     return 0;
 }
 
-int file_t::read(off_t off, size_t size, char* data) {
+int file_t::read(off_t off, size_t size, char *data) {
     const size_t _size_ = _size.load(memory_order_relaxed);
-    if ((size_t) off >= _size_) return 0;
+    if ((size_t)off >= _size_) return 0;
     size = min(_size_ - off, size);
     bmap_t bmap_dup{};
     {
@@ -72,7 +72,7 @@ int file_t::read(off_t off, size_t size, char* data) {
     return size;
 }
 
-static int write_cb1(shared_ptr<memory::block>& orig_block, size_t block_idx, size_t, size_t, char*, bmap_t &bmap_dup) {
+static int write_cb1(shared_ptr<memory::block> &orig_block, size_t block_idx, size_t, size_t, char *, bmap_t &bmap_dup) {
     if (!orig_block) {
         orig_block = memory::allocate();
         if (!orig_block) return -ENOSPC;
@@ -81,35 +81,35 @@ static int write_cb1(shared_ptr<memory::block>& orig_block, size_t block_idx, si
     return 0;
 }
 
-static int write_cb2(shared_ptr<memory::block>&, size_t block_idx, size_t block_off, size_t io_size, char* data_, bmap_t &bmap_dup) {
+static int write_cb2(shared_ptr<memory::block> &, size_t block_idx, size_t block_off, size_t io_size, char *data_, bmap_t &bmap_dup) {
     const char *data{data_};
-    shared_ptr<memory::block>& block = bmap_dup[block_idx];
+    shared_ptr<memory::block> &block = bmap_dup[block_idx];
     if (!block) abort();
     block->write(block_off, io_size, data);
     return 0;
 }
 
-int file_t::write(off_t off, size_t size, const char* data) {
+int file_t::write(off_t off, size_t size, const char *data) {
     if (!size) return 0;
     bmap_t bmap_dup{};
     const unique_lock lock{bmap_rwlock};
-    size = bmap_walk(off, size, const_cast<char *>(data), write_cb1, bmap_dup);
+    size = bmap_walk(off, size, const_cast<char*>(data), write_cb1, bmap_dup);
     if (!size) return -ENOSPC;
-    bmap_walk(off, size, const_cast<char *>(data), write_cb2, bmap_dup);
+    bmap_walk(off, size, const_cast<char*>(data), write_cb2, bmap_dup);
     if (_size.load(memory_order_relaxed) < size + off) _size.store(size + off, memory_order_relaxed);
     mtime(util::time());
     return size;
 }
 
-void file_t::free_blocks(size_t off, const unique_lock<shared_mutex>&) {
+void file_t::free_blocks(size_t off, const unique_lock<shared_mutex> &) {
     size_t block_start = off / memory::block::SIZE;
     if (block_start >= bmap.size()) abort();
     size_t tail = off % memory::block::SIZE;
     if (tail != 0) {
-        shared_ptr<memory::block>& block{bmap[block_start]};
+        shared_ptr<memory::block> &block{bmap[block_start]};
         if (block) block->truncate(tail);
         ++block_start;
     }
-    for (shared_ptr<memory::block>& block : bmap | views::drop(block_start)) block.reset();
+    for (shared_ptr<memory::block> &block : bmap | views::drop(block_start)) block.reset();
 }
 }

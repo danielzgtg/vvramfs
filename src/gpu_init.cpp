@@ -10,7 +10,7 @@ static uint32_t device_memory_type;
 
 namespace detail {
 uint32_t host_memory_type;
-vector<vram_buffer *> pool;
+vector<vram_buffer*> pool;
 mutex pool_lock{};
 PFN_vkGetMemoryHostPointerPropertiesEXT pfn_vk_get_memory_host_pointer_properties_ext;
 }
@@ -19,13 +19,13 @@ using namespace detail;
 
 void gpu_init(size_t size) {
     if (vk_device || !size || size % block::SIZE || size > INT16_MAX * block::SIZE) abort();
-    static const VkApplicationInfo application_info {
+    static const VkApplicationInfo application_info{
         .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
         .pApplicationName = "vvramfs",
         .applicationVersion = VK_MAKE_VERSION(1, 0, 0),
         .apiVersion = VK_API_VERSION_1_2,
     };
-    static const VkInstanceCreateInfo instance_create_info {
+    static const VkInstanceCreateInfo instance_create_info{
         .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
         .pApplicationInfo = &application_info,
     };
@@ -38,10 +38,10 @@ void gpu_init(size_t size) {
     if (vkEnumeratePhysicalDevices(vk_instance, &physical_device_count, physical_devices.data()) != VK_SUCCESS) abort();
     VkPhysicalDevice physical_device{};
     {
-        VkPhysicalDeviceExternalMemoryHostPropertiesEXT memory_host_properties_ext {
+        VkPhysicalDeviceExternalMemoryHostPropertiesEXT memory_host_properties_ext{
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_MEMORY_HOST_PROPERTIES_EXT,
         };
-        VkPhysicalDeviceProperties2 physical_device_properties2 {
+        VkPhysicalDeviceProperties2 physical_device_properties2{
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
             .pNext = &memory_host_properties_ext,
         };
@@ -77,14 +77,14 @@ void gpu_init(size_t size) {
         .pQueuePriorities = &ONE,
     };
     pool_create_info.queueFamilyIndex = transfer_family;
-    VkPhysicalDeviceVulkan12Features vulkan12_features {
+    VkPhysicalDeviceVulkan12Features vulkan12_features{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
         .timelineSemaphore = VK_TRUE,
     };
-    static constexpr array<const char *, 1> extension_names{
+    static constexpr array<const char*, 1> extension_names{
         VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME,
     };
-    const VkDeviceCreateInfo device_create_info {
+    const VkDeviceCreateInfo device_create_info{
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
         .pNext = &vulkan12_features,
         .queueCreateInfoCount = 1,
@@ -92,7 +92,7 @@ void gpu_init(size_t size) {
         .enabledExtensionCount = 1,
         .ppEnabledExtensionNames = extension_names.data(),
     };
-    if (vkCreateDevice(physical_device, &device_create_info,nullptr, &vk_device) != VK_SUCCESS) abort();
+    if (vkCreateDevice(physical_device, &device_create_info, nullptr, &vk_device) != VK_SUCCESS) abort();
     vkGetDeviceQueue(vk_device, transfer_family, 0, &transfer_queue);
     VkPhysicalDeviceMemoryProperties memory_properties;
     vkGetPhysicalDeviceMemoryProperties(physical_device, &memory_properties);
@@ -111,7 +111,7 @@ void gpu_init(size_t size) {
     }
     if (!~host_memory_type) abort();
     static constexpr VkSemaphoreTypeCreateInfo semaphore_type_create_info{
-        .sType =  VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
         .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE,
     };
     static constexpr VkSemaphoreCreateInfo semaphore_create_info{
@@ -119,8 +119,7 @@ void gpu_init(size_t size) {
         .pNext = &semaphore_type_create_info,
     };
     if (vkCreateSemaphore(vk_device, &semaphore_create_info, nullptr, &timeline_semaphore) != VK_SUCCESS) abort();
-    pfn_vk_get_memory_host_pointer_properties_ext = reinterpret_cast<PFN_vkGetMemoryHostPointerPropertiesEXT>(vkGetDeviceProcAddr(
-        vk_device, "vkGetMemoryHostPointerPropertiesEXT"));
+    pfn_vk_get_memory_host_pointer_properties_ext = reinterpret_cast<PFN_vkGetMemoryHostPointerPropertiesEXT>(vkGetDeviceProcAddr(vk_device, "vkGetMemoryHostPointerPropertiesEXT"));
     _pool_size = static_cast<int>(size / block::SIZE);
     lock_guard lock{pool_lock};
     for (auto _ : views::iota(int{}, _pool_size)) {
@@ -135,7 +134,7 @@ void gpu_init(size_t size) {
         VkMemoryRequirements memory_requirements;
         vkGetBufferMemoryRequirements(vk_device, vk_buffer, &memory_requirements);
         if (memory_requirements.size != block::SIZE || ~memory_requirements.memoryTypeBits & (1 << device_memory_type)) abort();
-        const VkMemoryAllocateInfo memory_allocate_info {
+        const VkMemoryAllocateInfo memory_allocate_info{
             .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
             .allocationSize = block::SIZE,
             .memoryTypeIndex = device_memory_type,
@@ -151,7 +150,7 @@ void gpu_init(size_t size) {
         vk_buffer = nullptr;
         buf = calloc(1, block::SIZE);
 #endif
-        pool.push_back(new vram_buffer {
+        pool.push_back(new vram_buffer{
             .mmap = buf,
             .vk = vk_buffer,
         });

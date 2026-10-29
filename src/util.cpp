@@ -9,7 +9,7 @@ timespec time() {
     return tv;
 }
 
-void split_file_path(const string& path, string& dir, string& file) {
+void split_file_path(const string &path, string &dir, string &file) {
     size_t p = path.rfind('/');
     if (p == string::npos) {
         dir = "";

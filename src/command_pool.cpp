@@ -7,6 +7,7 @@ using namespace std;
 namespace vram::memory {
 namespace {
 class command_recording;
+
 class command_pool {
     friend command_recording;
     VkCommandPool pool{};
@@ -21,10 +22,11 @@ public:
         };
         if (vkAllocateCommandBuffers(vk_device, &buffer_allocate_info, &buffer) != VK_SUCCESS) abort();
     }
-    command_pool(const command_pool& other) = delete;
-    command_pool(command_pool&& other) = delete;
-    command_pool& operator=(const command_pool& other) = delete;
-    command_pool& operator=(command_pool&& other) = delete;
+
+    command_pool(const command_pool &other) = delete;
+    command_pool(command_pool &&other) = delete;
+    command_pool& operator=(const command_pool &other) = delete;
+    command_pool& operator=(command_pool &&other) = delete;
 };
 
 vector<unique_ptr<command_pool>> command_pools;
@@ -46,23 +48,22 @@ public:
         }
         inner = make_unique<command_pool>();
     }
+
     ~command_pool_lease() {
         lock_guard lock{command_pools_lock};
         command_pools.emplace_back(std::move(inner));
     }
-    command_pool& operator*() const {
-        return *inner;
-    }
-    command_pool* operator->() const {
-        return &*inner;
-    }
-    command_pool_lease(const command_pool_lease& other) = delete;
-    command_pool_lease(command_pool_lease&& other) = delete;
-    command_pool_lease& operator=(const command_pool_lease& other) = delete;
-    command_pool_lease& operator=(command_pool_lease&& other) = delete;
+
+    command_pool& operator*() const { return *inner; }
+    command_pool* operator->() const { return &*inner; }
+    command_pool_lease(const command_pool_lease &other) = delete;
+    command_pool_lease(command_pool_lease &&other) = delete;
+    command_pool_lease& operator=(const command_pool_lease &other) = delete;
+    command_pool_lease& operator=(command_pool_lease &&other) = delete;
 };
 
 atomic_uint64_t cur_wait_semaphore_value{};
+
 class command_recording {
     command_pool_lease &inner;
 public:
@@ -75,6 +76,7 @@ public:
         };
         if (vkBeginCommandBuffer(**this, &begin_info) != VK_SUCCESS) abort();
     }
+
     ~command_recording() {
         if (vkEndCommandBuffer(**this) != VK_SUCCESS) abort();
         const uint64_t last_semaphore_value = cur_wait_semaphore_value.fetch_add(1, memory_order_relaxed);
@@ -109,16 +111,13 @@ public:
         vkResetCommandPool(vk_device, inner.inner->pool, 0);
         inner.in_use = false;
     }
-    VkCommandBuffer& operator*() const {
-        return inner.inner->buffer;
-    }
-    VkCommandBuffer* operator->() const {
-        return &inner.inner->buffer;
-    }
-    command_recording(const command_recording& other) = delete;
-    command_recording(command_recording&& other) = delete;
-    command_recording& operator=(const command_recording& other) = delete;
-    command_recording& operator=(command_recording&& other) = delete;
+
+    VkCommandBuffer& operator*() const { return inner.inner->buffer; }
+    VkCommandBuffer* operator->() const { return &inner.inner->buffer; }
+    command_recording(const command_recording &other) = delete;
+    command_recording(command_recording &&other) = delete;
+    command_recording& operator=(const command_recording &other) = delete;
+    command_recording& operator=(command_recording &&other) = delete;
 };
 }
 
@@ -133,7 +132,7 @@ void copy_buffer(VkBuffer src, VkBuffer dst, size_t src_offest, size_t dst_offse
     if (!size) return;
     command_pool_lease lease{};
     command_recording recording{lease};
-    const VkBufferCopy copy {
+    const VkBufferCopy copy{
         .srcOffset = src_offest,
         .dstOffset = dst_offset,
         .size = size,

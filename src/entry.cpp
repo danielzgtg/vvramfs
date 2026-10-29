@@ -15,7 +15,7 @@ entry_t::~entry_t() {
     entry_count.fetch_sub(1, memory_order_relaxed);
 }
 
-void entry_t::link(dir_t* parent, const string& name) {
+void entry_t::link(dir_t *parent, const string &name) {
     _parent = parent;
     _name = name;
     if (parent) {
@@ -60,7 +60,7 @@ void entry_t::unlink() {
     }
 }
 
-void entry_t::move(dir_t* new_parent, const string& new_name) {
+void entry_t::move(dir_t *new_parent, const string &new_name) {
     unlink();
     link(new_parent, new_name);
 }

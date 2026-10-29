@@ -19,7 +19,7 @@ struct vram_buffer {
 };
 
 extern uint32_t host_memory_type;
-extern std::vector<vram_buffer *> pool;
+extern std::vector<vram_buffer*> pool;
 extern std::mutex pool_lock;
 extern PFN_vkGetMemoryHostPointerPropertiesEXT pfn_vk_get_memory_host_pointer_properties_ext;
 }

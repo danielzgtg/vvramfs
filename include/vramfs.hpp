@@ -7,6 +7,6 @@ namespace vram {
 struct file_session {
     std::shared_ptr<entry::file_t> file;
 
-    file_session(std::shared_ptr<entry::file_t> file) : file(file) {}
+    explicit file_session(std::shared_ptr<entry::file_t> file) : file(file) {}
 };
 }

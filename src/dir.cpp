@@ -5,7 +5,7 @@
 using namespace std;
 
 namespace vram::entry {
-shared_ptr<dir_t> dir_t::make(dir_t* parent, const string& name) {
+shared_ptr<dir_t> dir_t::make(dir_t *parent, const string &name) {
     auto dir = shared_ptr<dir_t>(new dir_t());
     dir->link(parent, name);
     return dir;
@@ -13,7 +13,7 @@ shared_ptr<dir_t> dir_t::make(dir_t* parent, const string& name) {
 
 dir_t::dir_t() : entry_t{TYPE_DIR, 4096, 0755} {}
 
-int dir_t::find(const string& path, shared_ptr<entry_t>& entry, int filter) const {
+int dir_t::find(const string &path, shared_ptr<entry_t> &entry, int filter) const {
     if ((filter & TYPE_ALL) == 0) return -ENOENT;
     entry = const_pointer_cast<entry_t>(shared_from_this());
     stringstream stream(path.substr(1));
