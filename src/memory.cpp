@@ -1,3 +1,4 @@
+#include <atomic>
 #include <cstring>
 #include <ranges>
 #include <sys/user.h>
@@ -27,15 +28,17 @@ namespace vram {
             .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
         };
 
+        namespace {
         vector<vram_buffer *> pool;
         mutex pool_lock{};
-        size_t total_blocks = 0;
-
+        }
         size_t device_num = ~size_t{};
+        int _pool_size{};
+        atomic_int32_t _pool_available{};
 
         // Find platform with capable GPU
-        static void init_gpu() {
-            if (vk_device) return;
+        void init_gpu(size_t size) {
+            if (vk_device || !size || size % block::SIZE || size > INT16_MAX * block::SIZE) abort();
             static const VkApplicationInfo application_info {
                 .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
                 .pApplicationName = "vvramfs",
@@ -138,30 +141,9 @@ namespace vram {
             if (vkCreateSemaphore(vk_device, &semaphore_create_info, nullptr, &timeline_semaphore) != VK_SUCCESS) abort();
             pfn_vk_get_memory_host_pointer_properties_ext = reinterpret_cast<PFN_vkGetMemoryHostPointerPropertiesEXT>(vkGetDeviceProcAddr(
                 vk_device, "vkGetMemoryHostPointerPropertiesEXT"));
-        }
-
-        bool is_available() {
-            init_gpu();
-            return true;
-        }
-
-        void set_device(size_t device) {
-            device_num = device;
-        }
-
-        int pool_size() {
-            return total_blocks;
-        }
-
-        int pool_available() {
-            return pool.size();
-        }
-
-        void increase_pool(size_t size) {
-            if (size % block::SIZE) abort();
-            total_blocks = size / block::SIZE;
+            _pool_size = static_cast<int>(size / block::SIZE);
             lock_guard lock{pool_lock};
-            for (auto _ : views::iota(size_t{}, total_blocks)) {
+            for (auto _ : views::iota(int{}, _pool_size)) {
                 static constexpr VkBufferCreateInfo buffer_create_info{
                     .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
                     .size = block::SIZE,
@@ -194,11 +176,12 @@ namespace vram {
                     .vk = vk_buffer,
                 });
             }
+            _pool_available.store(_pool_size, memory_order_relaxed);
         }
 
-        block_ref allocate() {
-            if (pool.empty()) return {};
-            return block_ref(new block());
+        std::shared_ptr<block> allocate() {
+            if (!_pool_available.load(memory_order_relaxed)) return {};
+            return std::shared_ptr<block>(new block());
         }
 
         block::block() {
@@ -206,12 +189,14 @@ namespace vram {
             buffer = pool.back();
             if (!buffer) abort();
             pool.pop_back();
+            _pool_available.fetch_sub(1, memory_order_relaxed);
         }
 
         block::~block() {
             truncate(0);
             lock_guard lock{pool_lock};
             pool.push_back(buffer);
+            _pool_available.fetch_add(1, memory_order_relaxed);
             buffer = nullptr;
         }
 

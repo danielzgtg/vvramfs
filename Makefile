@@ -1,6 +1,6 @@
 CXX ?= g++
 CXXFLAGS += -std=c++23 -march=native -O3 $(shell pkg-config fuse3 --cflags) -I include/
-LDFLAGS += $(shell pkg-config fuse3 vulkan --libs)
+LDFLAGS += $(shell pkg-config fuse3 vulkan --libs) -latomic
 
 ifeq ($(DEBUG), 1)
 	CXXFLAGS += -g -DDEBUG -Wall -Werror

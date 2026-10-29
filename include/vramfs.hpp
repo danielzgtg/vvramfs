@@ -5,8 +5,8 @@
 namespace vram {
     // Data persistent in an open() and release() session
     struct file_session {
-        entry::file_ref file;
+        shared_ptr<entry::file_t> file;
 
-        file_session(entry::file_ref file) : file(file) {}
+        file_session(shared_ptr<entry::file_t> file) : file(file) {}
     };
 }
