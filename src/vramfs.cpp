@@ -199,6 +199,8 @@ static int vram_rename_finish(shared_ptr<entry::entry_t> &movend, const char *pa
 static int vram_rename(const char *old_path, const char *new_path, unsigned int flags) {
     if (flags & ~RENAME_NOREPLACE) return -EINVAL;
     {
+        // Early check to return better error code
+        // Kernel already handles error code for mountpoint dir and non-racy nested dir cycles
         const auto path_{new_path};
         PREP_CREAT_MUT_ENTRY_OR_RETURN(false);
     }
@@ -218,7 +220,7 @@ static int vram_rename(const char *old_path, const char *new_path, unsigned int 
     }
     return 0;
     // This isn't atomic but I'd rather not duplicate namei
-    // But server-side, it's safer than the previous code allowing moving directories into themselves
+    // But server-side, it's safer than the previous code allowing racily moving directories into themselves
 }
 
 static int vram_open(const char *path, fuse_file_info *fi) {
