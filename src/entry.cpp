@@ -15,17 +15,6 @@ entry_t::~entry_t() {
     entry_count.fetch_sub(1, memory_order_relaxed);
 }
 
-void entry_t::link(dir_t *parent, const string &name) {
-    _parent = parent;
-    _name = name;
-    if (parent) {
-        const unique_lock lock{parent->children_rwlock};
-        parent->_children[name] = shared_from_this();
-        parent->mtime(util::time());
-    }
-    ctime(util::time());
-}
-
 void entry_t::atime(timespec t) {
     _atime.store(t, memory_order_relaxed);
     ctime(util::time());
@@ -49,19 +38,5 @@ void entry_t::chown(uid_t user, gid_t group) {
     _user.store(user, memory_order_release);
     _group.store(group, memory_order_release);
     ctime(util::time());
-}
-
-void entry_t::unlink() {
-    if (_parent) {
-        const unique_lock lock{_parent->children_rwlock};
-        _parent->_children.erase(_name);
-        _parent->mtime(util::time());
-        _parent = nullptr;
-    }
-}
-
-void entry_t::move(dir_t *new_parent, const string &new_name) {
-    unlink();
-    link(new_parent, new_name);
 }
 }

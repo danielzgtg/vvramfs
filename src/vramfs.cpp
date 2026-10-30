@@ -7,20 +7,48 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
-#include "vramfs.hpp"
+#include "entry.hpp"
 #include "util.hpp"
 
 using namespace std;
 using namespace vram;
 using enum entry::type_t;
 
-/// File system root that links to the rest
-static shared_ptr<entry::dir_t> root_entry;
+static constexpr int filter_entry_type(const entry::entry_t &entry, underlying_type_t<entry::type_t> filter) {
+    if (!(entry.type & filter)) {
+        if (entry.type == TYPE_FILE) {
+            if (filter & TYPE_SYMLINK) return -ENOENT;
+            if (filter & TYPE_DIR) return -EISDIR;
+        } else if (entry.type == TYPE_DIR) {
+            if (filter & TYPE_FILE) return -ENOTDIR;
+            if (filter & TYPE_SYMLINK) return -EPERM;
+        } else {
+            return -EPERM;
+        }
+    }
+    return 0;
+}
+
+#define GET_ENTRY_OR_RETURN(filter) \
+    shared_ptr<entry::entry_t> entry_; \
+    if (const int err{entry::namei(path, nullptr, entry_)}; err) return err; \
+    entry::entry_t &entry{*entry_}; \
+    if (const int err{filter_entry_type(entry, filter)}; err) return err; \
+    do {} while (0)
+
+static int vram_init_impl() {
+    static constexpr auto path{"/"};
+    shared_ptr<entry::entry_t> entry_;
+    if (const int err{entry::namei(path, nullptr, entry_)}; err) return err;
+    entry::entry_t &entry{*entry_};
+    if (const int err{filter_entry_type(entry, TYPE_ALL)}; err) return err;
+    entry.chown(geteuid(), getegid());
+    return 0;
+}
 
 static void* vram_init(fuse_conn_info *conn, fuse_config *cfg) {
     cfg->direct_io = true;
-    root_entry = entry::dir_t::make(nullptr, "");
-    root_entry->chown(geteuid(), getegid());
+    if (vram_init_impl()) abort();
     cout << "mounted." << endl;
     return nullptr;
 }
@@ -36,74 +64,53 @@ static int vram_statfs(const char *, struct statvfs *vfs) {
 }
 
 static int vram_getattr(const char *path, struct stat *stbuf, fuse_file_info *) {
-    shared_ptr<entry::entry_t> entry;
-    int err = root_entry->find(path, entry);
-    if (err != 0) return err;
-    *stbuf = {};
-    const size_t size{entry->_size.load(memory_order_relaxed)};
-    if (entry->type == TYPE_DIR) {
-        stbuf->st_mode = S_IFDIR | entry->_mode.load(memory_order_acquire);
-        stbuf->st_nlink = 2;
-    } else if (entry->type == TYPE_FILE) {
-        stbuf->st_mode = S_IFREG | entry->_mode.load(memory_order_acquire);
-        stbuf->st_nlink = 1;
+    GET_ENTRY_OR_RETURN(TYPE_ALL);
+    *stbuf = {
+        .st_nlink = 1,
+        .st_mode = entry.type | entry._mode.load(memory_order_acquire),
+        .st_uid = entry._user.load(memory_order_acquire),
+        .st_gid = entry._group.load(memory_order_acquire),
+        .st_size = static_cast<off_t>(entry._size.load(memory_order_relaxed)),
+        .st_atim = entry._atime.load(memory_order_relaxed),
+        .st_mtim = entry._mtime.load(memory_order_relaxed),
+        .st_ctim = entry._ctime.load(memory_order_relaxed),
+    };
+    if (entry.type == TYPE_FILE) {
         stbuf->st_blksize = memory::block::SIZE;
-        if (size > 0) {
-            stbuf->st_blocks = static_cast<blkcnt_t>(1 + (size - 1) / 512); // man 2 stat
-        }
-    } else {
-        stbuf->st_mode = S_IFLNK | 0777;
-        stbuf->st_nlink = 1;
+        if (stbuf->st_size > 0) stbuf->st_blocks = 1 + (stbuf->st_size - 1) / 512; // man 2 stat
     }
-    stbuf->st_uid = entry->_user.load(memory_order_acquire);
-    stbuf->st_gid = entry->_group.load(memory_order_acquire);
-    stbuf->st_size = static_cast<off_t>(size);
-    stbuf->st_atim = entry->_atime.load(memory_order_relaxed);
-    stbuf->st_mtim = entry->_mtime.load(memory_order_relaxed);
-    stbuf->st_ctim = entry->_ctime.load(memory_order_relaxed);
     return 0;
 }
 
 static int vram_readlink(const char *path, char *buf, size_t size) {
-    shared_ptr<entry::entry_t> entry;
-    int err = root_entry->find(path, entry, TYPE_SYMLINK);
-    if (err != 0) return err;
-    auto symlink = dynamic_pointer_cast<entry::symlink_t>(entry);
-    // TODO atime
-    strncpy(buf, symlink->target.c_str(), size);
+    GET_ENTRY_OR_RETURN(TYPE_SYMLINK);
+    entry.atime(util::time());
+    strncpy(buf, dynamic_cast<entry::symlink_t*>(&entry)->target.c_str(), size);
     return 0;
 }
 
 static int vram_chmod(const char *path, mode_t mode, fuse_file_info *) {
-    shared_ptr<entry::entry_t> entry;
-    int err = root_entry->find(path, entry, TYPE_FILE | TYPE_DIR);
-    if (err != 0) return err;
-    entry->mode(mode);
+    GET_ENTRY_OR_RETURN(TYPE_FILE | TYPE_DIR);
+    entry.mode(mode);
     return 0;
 }
 
 static int vram_chown(const char *path, uid_t user, gid_t group, fuse_file_info *) {
-    shared_ptr<entry::entry_t> entry;
-    int err = root_entry->find(path, entry, TYPE_FILE | TYPE_DIR);
-    if (err != 0) return err;
-    entry->chown(user, group);
+    GET_ENTRY_OR_RETURN(TYPE_FILE | TYPE_DIR);
+    entry.chown(user, group);
     return 0;
 }
 
 static int vram_utimens(const char *path, const timespec tv[2], fuse_file_info *) {
-    shared_ptr<entry::entry_t> entry;
-    int err = root_entry->find(path, entry, TYPE_FILE | TYPE_DIR);
-    if (err != 0) return err;
-    entry->atime(tv[0]);
-    entry->mtime(tv[1]);
+    GET_ENTRY_OR_RETURN(TYPE_FILE | TYPE_DIR);
+    entry.atime(tv[0]);
+    entry.mtime(tv[1]);
     return 0;
 }
 
 static int vram_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t, fuse_file_info *, fuse_readdir_flags) {
-    shared_ptr<entry::entry_t> entry;
-    int err = root_entry->find(path, entry, TYPE_DIR);
-    if (err != 0) return err;
-    auto dir = dynamic_pointer_cast<entry::dir_t>(entry);
+    GET_ENTRY_OR_RETURN(TYPE_DIR);
+    const auto dir{dynamic_cast<entry::dir_t*>(&entry)};
     filler(buf, ".", nullptr, 0, FUSE_FILL_DIR_PLUS);
     filler(buf, "..", nullptr, 0, FUSE_FILL_DIR_PLUS);
     const shared_lock lock{dir->children_rwlock};
@@ -114,122 +121,121 @@ static int vram_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off
     return 0;
 }
 
-[[deprecated]] static mutex unlink_mutex{};
+static void chown_from_fuse_context(entry::entry_t &entry) {
+    const fuse_context *const context{fuse_get_context()};
+    entry.chown(context->uid, context->gid);
+}
 
-static int vram_create(const char *path, mode_t, struct fuse_file_info *fi) {
-    lock_guard<mutex> local_lock{unlink_mutex};
-    shared_ptr<entry::entry_t> entry;
-    int err = root_entry->find(path, entry, TYPE_FILE);
-    if (err == -EISDIR) return err;
-    // TODO EEXIST
-    else if (err == 0) entry->unlink();
-    string dir, name;
-    util::split_file_path(path, dir, name);
-    err = root_entry->find(dir, entry, TYPE_DIR);
-    if (err != 0) return err;
-    // TODO acquire children_rwlock unique_lock
-    auto parent = dynamic_pointer_cast<entry::dir_t>(entry);
-    auto file = entry::file_t::make(parent.get(), name);
-    auto context = fuse_get_context();
-    file->chown(context->uid, context->gid);
-    fi->fh = reinterpret_cast<uint64_t>(new file_session(file));
+#define PREP_CREAT_MUT_ENTRY_OR_RETURN(exist_ok) \
+    const string_view path{path_}; \
+    shared_ptr<entry::entry_t> entry_; \
+    entry::namei_w_lock w_lock; \
+    const int err{entry::namei(path, &w_lock, entry_)}; \
+    if (!w_lock.parent) return err; \
+    if (!(exist_ok) && entry_) return -EEXIST; \
+    do {} while (0)
+
+#define LN_ENTRY() \
+    chown_from_fuse_context(*entry_); \
+    w_lock.parent->_children[string{path.substr(path.rfind('/') + 1)}] = entry_; \
+    w_lock.parent->mtime(util::time()); \
+    do {} while (0)
+
+#define UNLINK_ENTRY() \
+    w_lock.parent->_children.erase(w_lock.parent->_children.find(path.substr(path.rfind('/') + 1))); \
+    w_lock.parent->mtime(util::time()); \
+    do {} while (0)
+
+static int vram_create(const char *path_, mode_t, struct fuse_file_info *fi) {
+    PREP_CREAT_MUT_ENTRY_OR_RETURN(~fi->flags & O_EXCL);
+    if (entry_ && entry_->type != TYPE_FILE) return -EISDIR;
+    entry_ = make_shared<entry::file_t>();
+    LN_ENTRY();
+    fi->fh = reinterpret_cast<uint64_t>(new shared_ptr{dynamic_pointer_cast<entry::file_t>(std::move(entry_))});
     return 0;
 }
 
-static int vram_mkdir(const char *path, mode_t) {
-    lock_guard<mutex> local_lock{unlink_mutex};
-    shared_ptr<entry::entry_t> entry;
-    int err = root_entry->find(path, entry);
-    if (err == 0) return -EEXIST;
-    string dir, name;
-    util::split_file_path(path, dir, name);
-    err = root_entry->find(dir, entry, TYPE_DIR);
-    if (err != 0) return err;
-    auto parent = dynamic_pointer_cast<entry::dir_t>(entry);
-    auto new_dir = entry::dir_t::make(parent.get(), name);
-    auto context = fuse_get_context();
-    new_dir->chown(context->uid, context->gid);
+static int vram_mkdir(const char *path_, mode_t) {
+    PREP_CREAT_MUT_ENTRY_OR_RETURN(false);
+    entry_ = make_shared<entry::dir_t>();
+    LN_ENTRY();
     return 0;
 }
 
-static int vram_symlink(const char *target, const char *path) {
-    lock_guard<mutex> local_lock{unlink_mutex};
-    shared_ptr<entry::entry_t> entry;
-    int err = root_entry->find(path, entry);
-    if (err == 0) return -EEXIST;
-    string dir, name;
-    util::split_file_path(path, dir, name);
-    err = root_entry->find(dir, entry, TYPE_DIR);
-    if (err != 0) return err;
-    auto parent = dynamic_pointer_cast<entry::dir_t>(entry);
-    auto symlink = entry::symlink_t::make(parent.get(), name, target);
-    auto context = fuse_get_context();
-    symlink->chown(context->uid, context->gid);
+static int vram_symlink(const char *target, const char *path_) {
+    PREP_CREAT_MUT_ENTRY_OR_RETURN(false);
+    entry_ = make_shared<entry::symlink_t>(target);
+    LN_ENTRY();
     return 0;
 }
 
-static int vram_unlink(const char *path) {
-    lock_guard<mutex> local_lock{unlink_mutex};
-    shared_ptr<entry::entry_t> entry;
-    int err = root_entry->find(path, entry, TYPE_FILE | TYPE_SYMLINK);
-    if (err != 0) return err;
-    entry->unlink();
+static int vram_unlink(const char *path_) {
+    PREP_CREAT_MUT_ENTRY_OR_RETURN(true);
+    if (!entry_) return -ENOENT;
+    if (!(entry_->type & (TYPE_FILE | TYPE_SYMLINK))) return -EISDIR;
+    UNLINK_ENTRY();
     return 0;
 }
 
-static int vram_rmdir(const char *path) {
-    lock_guard<mutex> local_lock{unlink_mutex};
-    shared_ptr<entry::entry_t> entry;
-    int err = root_entry->find(path, entry, TYPE_DIR);
-    if (err != 0) return err;
-    auto dir = dynamic_pointer_cast<entry::dir_t>(entry);
+static int vram_rmdir(const char *path_) {
+    PREP_CREAT_MUT_ENTRY_OR_RETURN(true);
+    if (!entry_) return -ENOENT;
+    if (~entry_->type & TYPE_DIR) return -ENOTDIR;
+    entry::dir_t &dir{*dynamic_cast<entry::dir_t*>(&*entry_)};
+    const shared_lock lock{dir.children_rwlock};
+    if (!dir._children.empty()) return -ENOTEMPTY;
+    UNLINK_ENTRY();
+    return 0;
+}
+
+static int vram_rename_finish(shared_ptr<entry::entry_t> &movend, const char *path_, bool no_replace) {
+    PREP_CREAT_MUT_ENTRY_OR_RETURN(!no_replace);
+    if (entry_ && entry_->type != TYPE_FILE) return -EISDIR;
+    entry_ = std::move(movend);
+    LN_ENTRY();
+    return 0;
+}
+
+static int vram_rename(const char *old_path, const char *new_path, unsigned int flags) {
+    if (flags & ~RENAME_NOREPLACE) return -EINVAL;
     {
-        const shared_lock lock{dir->children_rwlock};
-        dir->atime(util::time());
-        if (!dir->_children.empty()) return -ENOTEMPTY;
+        const auto path_{new_path};
+        PREP_CREAT_MUT_ENTRY_OR_RETURN(false);
     }
-    dir->unlink();
+    shared_ptr<entry::entry_t> movend;
+    {
+        const auto path_{old_path};
+        PREP_CREAT_MUT_ENTRY_OR_RETURN(true);
+        if (!entry_) return -ENOENT;
+        UNLINK_ENTRY();
+        movend = std::move(entry_);
+    }
+    if (const int err{vram_rename_finish(movend, new_path, flags & RENAME_NOREPLACE)}) {
+        if (vram_rename_finish(movend, old_path, true)) {
+            cerr << "Dangling entry after failed rename\n";
+        }
+        return err == -ENOENT ? -EINVAL : err;
+    }
     return 0;
-}
-
-static int vram_rename(const char *path, const char *new_path, unsigned int) {
-    lock_guard<mutex> local_lock{unlink_mutex};
-    shared_ptr<entry::entry_t> entry;
-    int err = root_entry->find(path, entry);
-    if (err != 0) return err;
-    string dir, new_name;
-    util::split_file_path(new_path, dir, new_name);
-    shared_ptr<entry::entry_t> parent_entry;
-    err = root_entry->find(dir, parent_entry, TYPE_DIR);
-    if (err != 0) return err;
-    auto parent = dynamic_pointer_cast<entry::dir_t>(parent_entry);
-    shared_ptr<entry::entry_t> dest_entry;
-    err = root_entry->find(new_path, dest_entry);
-    // TODO RENAME_NOREPLACE
-    if (err == 0) dest_entry->unlink();
-    entry->move(parent.get(), new_name);
-    return 0;
+    // This isn't atomic but I'd rather not duplicate namei
+    // But server-side, it's safer than the previous code allowing moving directories into themselves
 }
 
 static int vram_open(const char *path, fuse_file_info *fi) {
-    shared_ptr<entry::entry_t> entry;
-    int err = root_entry->find(path, entry, TYPE_FILE);
-    if (err != 0) return err;
-    auto file = dynamic_pointer_cast<entry::file_t>(entry);
+    GET_ENTRY_OR_RETURN(TYPE_FILE);
+    auto file{dynamic_pointer_cast<entry::file_t>(std::move(entry_))};
     if (fi->flags & O_TRUNC && fi->flags & (O_WRONLY | O_RDWR)) file->truncate(0);
-    fi->fh = reinterpret_cast<uint64_t>(new file_session(file));
+    fi->fh = reinterpret_cast<uint64_t>(new shared_ptr{std::move(file)});
     return 0;
 }
 
 static int vram_read(const char *path, char *buf, size_t size, off_t off, fuse_file_info *fi) {
     // printf("%s %lu %lu %lu\n", path, size, off, (size_t)buf & 0xfff);
-    shared_ptr<entry::file_t> file{reinterpret_cast<file_session*>(fi->fh)->file};
-    return file->read(off, size, buf);
+    return (*reinterpret_cast<shared_ptr<entry::file_t>*>(fi->fh))->read(off, size, buf);
 }
 
 static int vram_write(const char *path, const char *buf, size_t size, off_t off, fuse_file_info *fi) {
-    shared_ptr<entry::file_t> file{reinterpret_cast<file_session*>(fi->fh)->file};
-    return file->write(off, size, buf);
+    return (*reinterpret_cast<shared_ptr<entry::file_t>*>(fi->fh))->write(off, size, buf);
 }
 
 static int vram_fsync(const char *path, int, fuse_file_info *fi) {
@@ -240,18 +246,13 @@ static int vram_fsync(const char *path, int, fuse_file_info *fi) {
 static int vram_release(const char *path, fuse_file_info *fi) {
     // Although I worry about a race between release() and read()/write(),
     // the previously-here lock_guard wouldn't've prevented all instances of it
-    delete reinterpret_cast<file_session*>(fi->fh);
-    fi->fh = 0;
+    delete reinterpret_cast<shared_ptr<entry::file_t>*>(fi->fh);
     return 0;
 }
 
 static int vram_truncate(const char *path, off_t size, fuse_file_info *) {
-    shared_ptr<entry::file_t> file;
-    shared_ptr<entry::entry_t> entry;
-    int err = root_entry->find(path, entry, TYPE_FILE);
-    if (err != 0) return err;
-    file = dynamic_pointer_cast<entry::file_t>(entry);
-    return file->truncate(size);
+    GET_ENTRY_OR_RETURN(TYPE_FILE);
+    return dynamic_cast<entry::file_t&>(entry).truncate(size);
 }
 
 static constexpr fuse_operations operations{
@@ -313,7 +314,10 @@ int main(int argc, char *argv[]) {
     filesystem::create_directories(argv[1]);
     const size_t disk_size{parse_size(argv[2])};
     // bool force_allocate = (argc == 4 || argc == 6);
-    if (argc == 5 || argc == 6) memory::device_num = atoi(argv[4]);
+    if (argc == 5 || argc == 6) {
+        istringstream iss{argv[4]};
+        if (!(iss >> memory::device_num) || !iss.eof()) abort();
+    }
     if (mlockall(MCL_CURRENT | MCL_FUTURE)) cerr << "failed to lock process pages in memory, vramfs may freeze if swapped" << endl;
     cout << "allocating vram..." << endl;
     memory::gpu_init(disk_size);

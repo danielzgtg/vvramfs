@@ -7,12 +7,6 @@
 using namespace std;
 
 namespace vram::entry {
-shared_ptr<file_t> file_t::make(dir_t *parent, const string &name) {
-    auto file = shared_ptr<file_t>(new file_t());
-    file->link(parent, name);
-    return file;
-}
-
 file_t::file_t() : entry_t{TYPE_FILE, 0, 0644} {}
 
 int file_t::truncate(size_t new_size) {

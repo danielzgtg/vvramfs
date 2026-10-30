@@ -4,6 +4,7 @@
 #include <mutex>
 #include <string>
 #include <shared_mutex>
+#include <sys/stat.h>
 #include <unordered_map>
 
 #include "memory.hpp"
@@ -16,9 +17,9 @@ class symlink_t;
 
 enum type_t {
     TYPE_NONE = 0,
-    TYPE_FILE = 1,
-    TYPE_DIR = 2,
-    TYPE_SYMLINK = 4,
+    TYPE_FILE = S_IFREG,
+    TYPE_DIR = S_IFDIR,
+    TYPE_SYMLINK = S_IFLNK,
     TYPE_ALL = TYPE_FILE | TYPE_DIR | TYPE_SYMLINK,
 };
 
@@ -42,16 +43,8 @@ public:
     void ctime(timespec t);
     void mode(mode_t mode);
     void chown(uid_t user, gid_t group);
-    void unlink();
-    void move(dir_t *new_parent, const std::string &new_name);
 protected:
     explicit entry_t(type_t type_, size_t size_, mode_t mode_);
-    void link(dir_t *parent, const std::string &name);
-private:
-    /*[[deprecated]]*/
-    dir_t *_parent = nullptr;
-    /*[[deprecated]]*/
-    std::string _name;
 };
 
 static constexpr size_t MAX_FILE_SIZE = 2UL * 1024UL * 1024UL * 1024UL;
@@ -62,36 +55,43 @@ static_assert(MAX_IO_SIZE < MAX_FILE_SIZE);
 
 class file_t : public entry_t {
 public:
-    static std::shared_ptr<file_t> make(dir_t *parent, const std::string &name);
     int truncate(size_t new_size);
     int read(off_t off, size_t size, char *data);
     int write(off_t off, size_t size, const char *data);
+    explicit file_t();
 private:
     bmap_t bmap;
     std::shared_mutex bmap_rwlock;
-    explicit file_t();
     void free_blocks(size_t off, const std::unique_lock<std::shared_mutex> &);
     using bmap_cb = int(&)(std::shared_ptr<memory::block> &orig_block, size_t block_idx, size_t block_off, size_t io_size, char *data, bmap_t &bmap_dup);
-
     size_t bmap_walk(off_t off, size_t size, char *data, bmap_cb cb, bmap_t &bmap_dup);
+};
+
+struct namei_w_lock {
+    std::shared_lock<std::shared_mutex> r_lock_prev;
+    std::unique_lock<std::shared_mutex> w_lock;
+    dir_t *parent;
+};
+
+int namei(std::string_view path, namei_w_lock *w_lock, std::shared_ptr<entry_t> &result);
+
+struct sv_hash {
+    using is_transparent = void;
+    size_t operator()(std::string_view s) const { return std::hash<std::string_view>{}(s); }
+    size_t operator()(const std::string &s) const { return std::hash<std::string_view>{}(s); }
 };
 
 class dir_t : public entry_t {
     friend class entry_t;
 public:
-    static std::shared_ptr<dir_t> make(dir_t *parent, const std::string &name);
-    int find(const std::string &path, std::shared_ptr<entry_t> &entry, int filter = TYPE_ALL) const;
-    std::unordered_map<std::string, std::shared_ptr<entry_t>> _children;
+    std::unordered_map<std::string, std::shared_ptr<entry_t>, sv_hash, std::equal_to<>> _children;
     std::shared_mutex children_rwlock;
-private:
     explicit dir_t();
 };
 
 class symlink_t : public entry_t {
 public:
     const std::string target;
-    static std::shared_ptr<symlink_t> make(dir_t *parent, const std::string &name, const std::string &target);
-private:
     explicit symlink_t(const std::string &target);
 };
 }

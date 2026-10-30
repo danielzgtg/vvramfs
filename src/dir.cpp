@@ -1,45 +1,51 @@
-#include <sstream>
+#include <utility>
 
 #include "entry.hpp"
+#include "util.hpp"
 
 using namespace std;
 
 namespace vram::entry {
-shared_ptr<dir_t> dir_t::make(dir_t *parent, const string &name) {
-    auto dir = shared_ptr<dir_t>(new dir_t());
-    dir->link(parent, name);
-    return dir;
-}
-
 dir_t::dir_t() : entry_t{TYPE_DIR, 4096, 0755} {}
 
-int dir_t::find(const string &path, shared_ptr<entry_t> &entry, int filter) const {
-    if ((filter & TYPE_ALL) == 0) return -ENOENT;
-    entry = const_pointer_cast<entry_t>(shared_from_this());
-    stringstream stream(path.substr(1));
-    string part;
-    while (getline(stream, part, '/')) {
-        if (entry->type != TYPE_DIR) return -ENOTDIR;
-        auto dir = dynamic_pointer_cast<dir_t>(entry);
-        const shared_lock lock{dir->children_rwlock};
-        auto it = dir->_children.find(part);
-        if (it != dir->_children.end()) {
-            entry = it->second;
-        } else {
-            return -ENOENT;
-        }
+static const shared_ptr<dir_t> root_entry{make_shared<dir_t>()};
+
+int namei(string_view path, namei_w_lock *w_lock, shared_ptr<entry_t> &result) {
+    path.remove_prefix(1);
+    if (path.empty()) {
+        result = root_entry;
+        return 0;
     }
-    if (!(entry->type & filter)) {
-        if (entry->type == TYPE_FILE) {
-            if (filter & TYPE_SYMLINK) return -ENOENT;
-            if (filter & TYPE_DIR) return -EISDIR;
-        } else if (entry->type == TYPE_DIR) {
-            if (filter & TYPE_FILE) return -ENOTDIR;
-            if (filter & TYPE_SYMLINK) return -EPERM;
+    dir_t *parent{&*root_entry};
+    shared_lock<shared_mutex> r_lock_prev{}; // replaces shared_ptr
+    shared_lock<shared_mutex> r_lock_cur{}; // guards _children
+    for (;;) {
+        r_lock_prev = std::move(r_lock_cur);
+        const size_t sep_i{path.find('/')};
+        string_view current_component;
+        if (!~sep_i) {
+            current_component = path;
+            if (w_lock) {
+                w_lock->w_lock = unique_lock{parent->children_rwlock};
+                if (parent->_children.empty()) w_lock->r_lock_prev = std::move(r_lock_prev);
+                w_lock->parent = parent;
+            } else {
+                r_lock_cur = shared_lock{parent->children_rwlock};
+            }
         } else {
-            return -EPERM;
+            current_component = path.substr(0, sep_i);
+            path.remove_prefix(sep_i + 1);
+            r_lock_cur = shared_lock{parent->children_rwlock};
         }
+        const auto it = parent->_children.find(current_component);
+        if (it == parent->_children.end()) return -ENOENT;
+        const shared_ptr<entry_t> &current = it->second;
+        if (!~sep_i) {
+            result = current;
+            return 0;
+        }
+        parent = dynamic_cast<dir_t*>(&*current);
+        if (!parent) return -ENOTDIR;
     }
-    return 0;
 }
 }
