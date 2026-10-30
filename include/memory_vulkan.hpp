@@ -13,6 +13,10 @@ extern VkSemaphore timeline_semaphore;
 extern VkBuffer download_buffer;
 extern VkCommandPoolCreateInfo pool_create_info;
 
+static constexpr uint DOWNLOAD_ARENA_BUF_COUNT = 16;
+static constexpr size_t DOWNLOAD_ARENA_BUFS_SIZE = DOWNLOAD_ARENA_BUF_SIZE * DOWNLOAD_ARENA_BUF_COUNT;
+extern void *download_arena_start;
+
 namespace detail {
 struct vram_buffer {
     void *mmap;

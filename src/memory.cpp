@@ -2,7 +2,6 @@
 #include <ranges>
 #include <sys/user.h>
 
-#include "free_interposer.hpp"
 #include "memory_vulkan.hpp"
 
 using namespace std;
@@ -46,8 +45,9 @@ block::~block() {
     buffer = nullptr;
 }
 
-// TODO move to read_buf and aligned_alloc
-static mutex page_mmap_mutex{};
+void *download_arena_start{};
+atomic_uint download_arena_locks_head{};
+atomic_bool download_arena_locks[DOWNLOAD_ARENA_BUF_COUNT]{};
 
 void block::read(size_t offset, size_t size, void *data) const {
     if (offset > SIZE || size > SIZE || offset + size > SIZE) abort();
@@ -55,59 +55,22 @@ void block::read(size_t offset, size_t size, void *data) const {
         memcpy(data, static_cast<char*>(buffer->mmap) + offset, size);
         return;
     }
-#if NO_MMAP_EXPERIMENT
-    void *mem = free_interposer_malloc();
-    copy_buffer(buffer->vk, download_buffer, offset, (uintptr_t)mem - (uintptr_t)free_interposer_ignore_start, size);
+    void *mem;
+    void *const start{download_arena_start};
+    if (!start) abort();
+    uint download_arena_i;
+    for (;;) {
+        static_assert(std::has_single_bit(DOWNLOAD_ARENA_BUF_COUNT));
+        download_arena_i = download_arena_locks_head.fetch_add(1, memory_order_relaxed) % DOWNLOAD_ARENA_BUF_COUNT;
+        bool expected{false};
+        if (download_arena_locks[download_arena_i].compare_exchange_weak(expected, true, memory_order_acq_rel, memory_order_relaxed)) {
+            mem = static_cast<char*>(start) + DOWNLOAD_ARENA_BUF_SIZE * download_arena_i;
+            break;
+        }
+    }
+    copy_buffer(buffer->vk, download_buffer, offset, reinterpret_cast<uintptr_t>(mem) - reinterpret_cast<uintptr_t>(start), size);
+    download_arena_locks[download_arena_i].store(false, memory_order_relaxed);
     memcpy(data, mem, size);
-#else
-    lock_guard page_mmap_lock{page_mmap_mutex};
-    const char *const data_addr{static_cast<char*>(data)};
-    const auto vk_page_mmap_start = reinterpret_cast<char*>(reinterpret_cast<uintptr_t>(data) & PAGE_MASK);
-    const auto vk_page_mmap_end = reinterpret_cast<char*>(reinterpret_cast<uintptr_t>(data) + size + ~PAGE_MASK &
-        PAGE_MASK);
-    const size_t vk_page_mmap_size = vk_page_mmap_end - vk_page_mmap_start;
-    VkMemoryHostPointerPropertiesEXT host_pointer_properties_ext{
-        .sType = VK_STRUCTURE_TYPE_MEMORY_HOST_POINTER_PROPERTIES_EXT,
-    };
-    if (pfn_vk_get_memory_host_pointer_properties_ext(vk_device, VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT,
-                                                      vk_page_mmap_start,
-                                                      &host_pointer_properties_ext) != VK_SUCCESS) abort();
-    if (~host_pointer_properties_ext.memoryTypeBits & (1 << host_memory_type)) abort();
-    static constexpr VkExternalMemoryBufferCreateInfo external_memory_buffer_create_info{
-        .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO,
-        .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT,
-    };
-    const VkBufferCreateInfo create_info{
-        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-        .pNext = &external_memory_buffer_create_info,
-        .size = vk_page_mmap_size,
-        .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-    };
-    VkBuffer dst_buffer;
-    if (vkCreateBuffer(vk_device, &create_info, nullptr, &dst_buffer) != VK_SUCCESS) abort();
-    VkMemoryRequirements memory_requirements;
-    vkGetBufferMemoryRequirements(vk_device, dst_buffer, &memory_requirements);
-    if (memory_requirements.size != vk_page_mmap_size || memory_requirements.alignment > PAGE_SIZE || ~
-        memory_requirements.memoryTypeBits & (1 << host_memory_type)) abort();
-    const VkImportMemoryHostPointerInfoEXT host_pointer_info_ext{
-        .sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_HOST_POINTER_INFO_EXT,
-        .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT,
-        .pHostPointer = vk_page_mmap_start,
-    };
-    const VkMemoryAllocateInfo memory_allocate_info{
-        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-        .pNext = &host_pointer_info_ext,
-        .allocationSize = vk_page_mmap_size,
-        .memoryTypeIndex = host_memory_type,
-    };
-    VkDeviceMemory host_memory;
-    if (vkAllocateMemory(vk_device, &memory_allocate_info, nullptr, &host_memory) != VK_SUCCESS) abort();
-    if (vkBindBufferMemory(vk_device, dst_buffer, host_memory, 0) != VK_SUCCESS) abort();
-    copy_buffer(buffer->vk, dst_buffer, offset, data_addr - vk_page_mmap_start, size);
-    vkFreeMemory(vk_device, host_memory, nullptr);
-    vkDestroyBuffer(vk_device, dst_buffer, nullptr);
-#endif
 }
 
 void block::write(size_t offset, size_t size, const void *data) {

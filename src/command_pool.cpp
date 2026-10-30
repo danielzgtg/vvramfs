@@ -1,6 +1,5 @@
 #include <vulkan/vulkan.h>
 
-#include "free_interposer.hpp"
 #include "memory_vulkan.hpp"
 
 using namespace std;
@@ -108,7 +107,7 @@ public:
             .pSemaphores = &timeline_semaphore,
             .pValues = &next_semaphore_value,
         };
-        if (!free_interposer_ignore_start || true) if (vkWaitSemaphores(vk_device, &wait_info, ~0UL) != VK_SUCCESS) abort();
+        if (vkWaitSemaphores(vk_device, &wait_info, ~0UL) != VK_SUCCESS) abort();
         vkResetCommandPool(vk_device, inner.inner->pool, 0);
         inner.in_use = false;
     }

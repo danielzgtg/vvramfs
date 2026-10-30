@@ -8,6 +8,7 @@ namespace vram::memory {
 extern size_t device_num;
 extern int _pool_size;
 extern std::atomic_int32_t _pool_available;
+static constexpr size_t DOWNLOAD_ARENA_BUF_SIZE = 1024UL * 1024UL;
 void gpu_init(size_t size);
 
 namespace detail {

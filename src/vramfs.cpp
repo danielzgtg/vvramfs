@@ -8,7 +8,6 @@
 #include <unistd.h>
 
 #include "entry.hpp"
-#include "free_interposer.hpp"
 #include "util.hpp"
 
 using namespace std;
@@ -232,29 +231,8 @@ static int vram_open(const char *path, fuse_file_info *fi) {
     return 0;
 }
 
-int vram_read_buf(const char *, fuse_bufvec **bufp, size_t size, off_t off, fuse_file_info *fi) {
-    const auto buf{static_cast<fuse_bufvec *>(malloc(sizeof(fuse_bufvec)))};
-    if (!buf || size > FREE_INTERPOSER_BUF_SIZE) abort();
-#if 0
-    // writev(2) from my mmap-ed buffer is inexplicably 2.7 GB/s without any GPU operations
-    // while the same short-circuit path with malloc is 6 GB/s. Somehow adding a copying step makes it (the kernel?) faster
-    const auto mem{static_cast<char*>(free_interposer_malloc2())};
-#else
-    const auto mem{static_cast<char*>(malloc(size))};
-#endif
-    if (!mem) abort();
-    *buf = FUSE_BUFVEC_INIT(size);
-    // printf("%p\n", mem);
-    buf->buf[0].mem = mem;
-    *bufp = buf;
-    // printf("%s %lu %lu %lu\n", path, size, off, (size_t)mem & 0xfff);
-#if 1
-    const int ret{(*reinterpret_cast<shared_ptr<entry::file_t>*>(fi->fh))->read(off, size, mem)};
-#else
-    int ret = size;
-#endif
-    if (ret >= 0) buf->buf[0].size = ret;
-    return ret;
+static int vram_read(const char *path, char *buf, size_t size, off_t off, fuse_file_info *fi) {
+    return (*reinterpret_cast<shared_ptr<entry::file_t>*>(fi->fh))->read(off, size, buf);
 }
 
 static int vram_write(const char *path, const char *buf, size_t size, off_t off, fuse_file_info *fi) {
@@ -290,6 +268,7 @@ static constexpr fuse_operations operations{
     .chown = vram_chown,
     .truncate = vram_truncate,
     .open = vram_open,
+    .read = vram_read,
     .write = vram_write,
     .statfs = vram_statfs,
     .release = vram_release,
@@ -298,7 +277,6 @@ static constexpr fuse_operations operations{
     .init = vram_init,
     .create = vram_create,
     .utimens = vram_utimens,
-    .read_buf = vram_read_buf,
 };
 
 static int print_help() {
@@ -329,9 +307,7 @@ static size_t parse_size(const string &param) {
     return size;
 }
 
-void *testptr;
 int main(int argc, char *argv[]) {
-    free(testptr);
     if (argc < 3 || argc > 6) return print_help();
     if (argc == 4 && strcmp(argv[3], "-f") != 0) return print_help();
     if (argc == 5 && strcmp(argv[3], "-d") != 0) return print_help();
@@ -348,7 +324,6 @@ int main(int argc, char *argv[]) {
     memory::gpu_init(disk_size);
     fuse_args args = FUSE_ARGS_INIT(2, argv);
     fuse_opt_parse(&args, nullptr, nullptr, nullptr);
-    fuse_opt_add_arg(&args, "-s");
     fuse_opt_add_arg(&args, "-oauto_unmount"); // Properly unmount even on crash
     fuse_opt_add_arg(&args, "-odefault_permissions"); // Let FUSE and the kernel deal with permissions handling
     fuse_opt_add_arg(&args, "-f"); // GPU driver acts funky if program doesn't keep running in foreground
