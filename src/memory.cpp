@@ -2,6 +2,7 @@
 #include <ranges>
 #include <sys/user.h>
 
+#include "free_interposer.hpp"
 #include "memory_vulkan.hpp"
 
 using namespace std;
@@ -13,6 +14,7 @@ using namespace detail;
 VkDevice vk_device;
 VkQueue transfer_queue;
 VkSemaphore timeline_semaphore;
+VkBuffer download_buffer;
 
 VkCommandPoolCreateInfo pool_create_info{
     .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
@@ -53,6 +55,11 @@ void block::read(size_t offset, size_t size, void *data) const {
         memcpy(data, static_cast<char*>(buffer->mmap) + offset, size);
         return;
     }
+#if NO_MMAP_EXPERIMENT
+    void *mem = free_interposer_malloc();
+    copy_buffer(buffer->vk, download_buffer, offset, (uintptr_t)mem - (uintptr_t)free_interposer_ignore_start, size);
+    memcpy(data, mem, size);
+#else
     lock_guard page_mmap_lock{page_mmap_mutex};
     const char *const data_addr{static_cast<char*>(data)};
     const auto vk_page_mmap_start = reinterpret_cast<char*>(reinterpret_cast<uintptr_t>(data) & PAGE_MASK);
@@ -100,6 +107,7 @@ void block::read(size_t offset, size_t size, void *data) const {
     copy_buffer(buffer->vk, dst_buffer, offset, data_addr - vk_page_mmap_start, size);
     vkFreeMemory(vk_device, host_memory, nullptr);
     vkDestroyBuffer(vk_device, dst_buffer, nullptr);
+#endif
 }
 
 void block::write(size_t offset, size_t size, const void *data) {

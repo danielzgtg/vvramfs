@@ -127,14 +127,16 @@ Performance has been measured:
     * First launch: 724 MB/s
 * `dd if=/tmp/test of=/tmp/vram/test bs=1M count=1024 oflag=dsync`: 1.9 GB/s
 * `dd if=/dev/urandom of=/tmp/vram/test bs=1M count=1024 oflag=dsync`: 429 MB/s
-* `dd if=/tmp/vram/test of=/dev/null bs=1M count=1024 oflag=dsync`: 2.2 GB/s
-    * This fluctuates still, and I aim to reach the original vramfs's 2.4 GB/s
+* `dd if=/tmp/vram/test of=/dev/null bs=1M count=1024 oflag=dsync`: 2.9 GB/s
 
 Regular ramdisk comparison:
 
 * `dd if=/tmp/test of=/tmp/test2 bs=1M count=1024 oflag=dsync`: 1.7 GB/s
 * `dd if=/dev/urandom of=/tmp/test bs=1M count=1024 oflag=dsync`: 420 MB/s
 * `dd if=/tmp/test of=/dev/null bs=1M count=1024 oflag=dsync`: 3.7 GB/s
+* vvramfs mmap-not-malloc no-GPU-submit `dd if=/tmp/vram/test of=/dev/null bs=1M count=1024 oflag=dsync`: 1.6 GB/s
+* vvramfs no-GPU-submit a.k.a libfuse3 overhead only `dd if=/tmp/vram/test of=/dev/null bs=1M count=1024 oflag=dsync`: 5.9 GB/s
+* vvramfs no-GPU-await `dd if=/tmp/vram/test of=/dev/null bs=1M count=1024 oflag=dsync`: 5.3 GB/s
 
 License
 -------

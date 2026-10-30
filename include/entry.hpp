@@ -47,11 +47,9 @@ protected:
     explicit entry_t(type_t type_, size_t size_, mode_t mode_);
 };
 
-static constexpr size_t MAX_FILE_SIZE = 2UL * 1024UL * 1024UL * 1024UL;
+static constexpr size_t MAX_FILE_SIZE = 8UL * 1024UL * 1024UL * 1024UL;
 static_assert(MAX_FILE_SIZE % memory::block::SIZE == 0);
 using bmap_t = std::array<std::shared_ptr<memory::block>, MAX_FILE_SIZE / memory::block::SIZE>;
-static constexpr size_t MAX_IO_SIZE = 1024UL * 1024UL;
-static_assert(MAX_IO_SIZE < MAX_FILE_SIZE);
 
 class file_t : public entry_t {
 public:

@@ -1,6 +1,8 @@
 #include <ranges>
+#include <sys/mman.h>
 #include <sys/user.h>
 
+#include "free_interposer.hpp"
 #include "memory_vulkan.hpp"
 
 using namespace std;
@@ -16,6 +18,8 @@ PFN_vkGetMemoryHostPointerPropertiesEXT pfn_vk_get_memory_host_pointer_propertie
 }
 
 using namespace detail;
+
+#define DEBUG_REPLACE_VRAM_WITH_RAM 0
 
 void gpu_init(size_t size) {
     if (vk_device || !size || size % block::SIZE || size > INT16_MAX * block::SIZE) abort();
@@ -140,15 +144,15 @@ void gpu_init(size_t size) {
             .memoryTypeIndex = device_memory_type,
         };
         void *buf;
-#if 1
+#if DEBUG_REPLACE_VRAM_WITH_RAM
+        vk_buffer = nullptr;
+        buf = calloc(1, block::SIZE);
+#else
         VkDeviceMemory device_memory;
         if (vkAllocateMemory(vk_device, &memory_allocate_info, nullptr, &device_memory) != VK_SUCCESS) abort();
         if (vkMapMemory(vk_device, device_memory, 0, block::SIZE, 0, &buf) != VK_SUCCESS) abort();
         vkBindBufferMemory(vk_device, vk_buffer, device_memory, 0);
         clear_buffer(vk_buffer, 0, block::SIZE);
-#else
-        vk_buffer = nullptr;
-        buf = calloc(1, block::SIZE);
 #endif
         pool.push_back(new vram_buffer{
             .mmap = buf,
@@ -156,5 +160,82 @@ void gpu_init(size_t size) {
         });
     }
     _pool_available.store(_pool_size, memory_order_relaxed);
+    {
+#if NO_RENDERD128_WRITEV
+        free_interposer_ignore_start = mmap(nullptr, FREE_INTERPOSER_BUFS_SIZE, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+         if (!free_interposer_ignore_start) abort();
+#if NO_MMAP_EXPERIMENT
+        VkMemoryHostPointerPropertiesEXT host_pointer_properties_ext{
+            .sType = VK_STRUCTURE_TYPE_MEMORY_HOST_POINTER_PROPERTIES_EXT,
+        };
+        if (pfn_vk_get_memory_host_pointer_properties_ext(vk_device, VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT,
+                                                          free_interposer_ignore_start,
+                                                          &host_pointer_properties_ext) != VK_SUCCESS) abort();
+        if (~host_pointer_properties_ext.memoryTypeBits & (1 << host_memory_type)) abort();
+        static constexpr VkExternalMemoryBufferCreateInfo external_memory_buffer_create_info{
+            .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO,
+            .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT,
+        };
+        const VkBufferCreateInfo create_info{
+            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+            .pNext = &external_memory_buffer_create_info,
+            .size = FREE_INTERPOSER_BUFS_SIZE,
+            .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+            .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        };
+        if (vkCreateBuffer(vk_device, &create_info, nullptr, &download_buffer) != VK_SUCCESS) abort();
+        VkMemoryRequirements memory_requirements;
+        vkGetBufferMemoryRequirements(vk_device, download_buffer, &memory_requirements);
+        if (memory_requirements.size != FREE_INTERPOSER_BUFS_SIZE || memory_requirements.alignment > PAGE_SIZE || ~
+            memory_requirements.memoryTypeBits & (1 << host_memory_type)) abort();
+        const VkImportMemoryHostPointerInfoEXT host_pointer_info_ext{
+            .sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_HOST_POINTER_INFO_EXT,
+            .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT,
+            .pHostPointer = free_interposer_ignore_start,
+        };
+        const VkMemoryAllocateInfo memory_allocate_info{
+            .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+            .pNext = &host_pointer_info_ext,
+            .allocationSize = FREE_INTERPOSER_BUFS_SIZE,
+            .memoryTypeIndex = host_memory_type,
+        };
+        VkDeviceMemory host_memory;
+        if (vkAllocateMemory(vk_device, &memory_allocate_info, nullptr, &host_memory) != VK_SUCCESS) abort();
+        if (vkBindBufferMemory(vk_device, download_buffer, host_memory, 0) != VK_SUCCESS) abort();
+#endif
+#else
+        static constexpr VkBufferCreateInfo buffer_create_info{
+            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+            .size = FREE_INTERPOSER_BUFS_SIZE,
+            .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+            .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        };
+        if (vkCreateBuffer(vk_device, &buffer_create_info, nullptr, &download_buffer) != VK_SUCCESS) abort();
+        VkMemoryRequirements memory_requirements;
+        vkGetBufferMemoryRequirements(vk_device, download_buffer, &memory_requirements);
+        if (memory_requirements.size != FREE_INTERPOSER_BUFS_SIZE || ~memory_requirements.memoryTypeBits & (1 << host_memory_type)) abort();
+        const VkMemoryAllocateInfo memory_allocate_info{
+            .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+            .allocationSize = FREE_INTERPOSER_BUFS_SIZE,
+            .memoryTypeIndex = host_memory_type,
+        };
+#if DEBUG_REPLACE_VRAM_WITH_RAM
+        download_buffer = nullptr;
+        // free_interposer_ignore_start = calloc(1, FREE_INTERPOSER_BUFS_SIZE);
+        free_interposer_ignore_start = mmap(nullptr, FREE_INTERPOSER_BUFS_SIZE, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+        if (!free_interposer_ignore_start) abort();
+#else
+        VkDeviceMemory host_memory;
+        if (vkAllocateMemory(vk_device, &memory_allocate_info, nullptr, &host_memory) != VK_SUCCESS) abort();
+        if (vkMapMemory(vk_device, host_memory, 0, FREE_INTERPOSER_BUFS_SIZE, 0, &free_interposer_ignore_start) != VK_SUCCESS) abort();
+        vkBindBufferMemory(vk_device, download_buffer, host_memory, 0);
+        // clear_buffer(staging_buffer, 0, FREE_INTERPOSER_BUFS_SIZE);
+        free_interposer_ignore_start2 = mmap(nullptr, FREE_INTERPOSER_BUFS_SIZE, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE | MAP_POPULATE, -1, 0);
+        *((char*)free_interposer_ignore_start2) = 0;
+        if (!free_interposer_ignore_start2) abort();
+        if (madvise(free_interposer_ignore_start2, FREE_INTERPOSER_BUFS_SIZE, MADV_HUGEPAGE)) abort();
+#endif
+#endif
+    }
 }
 }

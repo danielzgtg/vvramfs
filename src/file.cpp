@@ -2,6 +2,7 @@
 #include <ranges>
 
 #include "entry.hpp"
+#include "free_interposer.hpp"
 #include "util.hpp"
 
 using namespace std;
@@ -19,10 +20,10 @@ int file_t::truncate(size_t new_size) {
 }
 
 size_t file_t::bmap_walk(off_t off_, const size_t size, char *data, bmap_cb cb, bmap_t &bmap_dup) {
-    if (off_ < 0 || off_ > MAX_FILE_SIZE || size > MAX_IO_SIZE) return -EINVAL;
+    if (off_ < 0 || size > FREE_INTERPOSER_BUF_SIZE) abort();
+    if (off_ > MAX_FILE_SIZE) return 0;
     size_t off = off_;
-    const size_t end_pos = off + size;
-    if (end_pos > MAX_FILE_SIZE) return -EINVAL;
+    const size_t end_pos = min(off + size, MAX_FILE_SIZE);
     while (off < end_pos) {
         // Find block corresponding to current offset
         const size_t block_idx{off / memory::block::SIZE};
@@ -63,7 +64,7 @@ int file_t::read(off_t off, size_t size, char *data) {
     }
     bmap_walk(off, size, data, read_cb2, bmap_dup);
     atime(util::time());
-    return size;
+    return static_cast<int>(size); // max MAX_FILE_SIZE
 }
 
 static int write_cb1(shared_ptr<memory::block> &orig_block, size_t block_idx, size_t, size_t, char *, bmap_t &bmap_dup) {
@@ -92,7 +93,7 @@ int file_t::write(off_t off, size_t size, const char *data) {
     bmap_walk(off, size, const_cast<char*>(data), write_cb2, bmap_dup);
     if (_size.load(memory_order_relaxed) < size + off) _size.store(size + off, memory_order_relaxed);
     mtime(util::time());
-    return size;
+    return static_cast<int>(size); // max MAX_FILE_SIZE
 }
 
 void file_t::free_blocks(size_t off, const unique_lock<shared_mutex> &) {
