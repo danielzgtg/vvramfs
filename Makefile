@@ -8,9 +8,9 @@ endif
 CXXFLAGS += -g
 
 .PHONY: all
-all: bin/vramfs
+all: bin/vvramfs
 
-bin/vramfs: build/command_pool.o build/dir.o build/entry.o build/file.o build/gpu_init.o build/memory.o build/symlink.o build/util.o build/vramfs.o | bin
+bin/vvramfs: build/command_pool.o build/dir.o build/entry.o build/file.o build/gpu_init.o build/memory.o build/symlink.o build/util.o build/vramfs.o | bin
 	$(CXX) -o $@ $^ $(LDFLAGS)
 
 build bin:
