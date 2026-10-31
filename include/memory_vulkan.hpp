@@ -9,6 +9,7 @@
 namespace vram::memory {
 extern VkDevice vk_device;
 extern VkQueue transfer_queue;
+extern std::mutex transfer_queue_mutex;
 extern VkSemaphore timeline_semaphore;
 extern VkBuffer download_buffer;
 extern VkCommandPoolCreateInfo pool_create_info;

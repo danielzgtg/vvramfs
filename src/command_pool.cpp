@@ -35,7 +35,7 @@ mutex command_pools_lock;
 class command_pool_lease {
     friend command_recording;
     unique_ptr<command_pool> inner;
-    bool in_use{};
+    // pid_t in_use{};
 public:
     explicit command_pool_lease() {
         {
@@ -68,8 +68,8 @@ class command_recording {
     command_pool_lease &inner;
 public:
     explicit command_recording(command_pool_lease &inner_) : inner{inner_} {
-        if (inner.in_use) abort();
-        inner.in_use = true;
+        // if (inner.in_use) abort();
+        // inner.in_use = gettid();
         static constexpr VkCommandBufferBeginInfo begin_info{
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
             .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
@@ -79,8 +79,8 @@ public:
 
     ~command_recording() {
         if (vkEndCommandBuffer(**this) != VK_SUCCESS) abort();
-        const uint64_t last_semaphore_value = cur_wait_semaphore_value.fetch_add(1, memory_order_relaxed);
-        const uint64_t next_semaphore_value = last_semaphore_value + 1;
+        uint64_t last_semaphore_value;
+        uint64_t next_semaphore_value;
         const VkTimelineSemaphoreSubmitInfo timeline_semaphore_submit_info{
             .sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO,
             .waitSemaphoreValueCount = 1,
@@ -88,7 +88,7 @@ public:
             .signalSemaphoreValueCount = 1,
             .pSignalSemaphoreValues = &next_semaphore_value,
         };
-        static constexpr VkPipelineStageFlags pipeline_stage_flags = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        static constexpr VkPipelineStageFlags pipeline_stage_flags = VK_PIPELINE_STAGE_TRANSFER_BIT;
         const VkSubmitInfo submit_info{
             .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
             .pNext = &timeline_semaphore_submit_info,
@@ -100,7 +100,13 @@ public:
             .signalSemaphoreCount = 1,
             .pSignalSemaphores = &timeline_semaphore,
         };
-        if (vkQueueSubmit(transfer_queue, 1, &submit_info, nullptr) != VK_SUCCESS) abort();
+        // if (inner.in_use != gettid()) abort();
+        {
+            unique_lock lock{transfer_queue_mutex};
+            last_semaphore_value = cur_wait_semaphore_value.fetch_add(1, memory_order_relaxed);
+            next_semaphore_value = last_semaphore_value + 1;
+            if (vkQueueSubmit(transfer_queue, 1, &submit_info, nullptr) != VK_SUCCESS) abort();
+        }
         const VkSemaphoreWaitInfo wait_info{
             .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
             .semaphoreCount = 1,
@@ -109,7 +115,7 @@ public:
         };
         if (vkWaitSemaphores(vk_device, &wait_info, ~0UL) != VK_SUCCESS) abort();
         vkResetCommandPool(vk_device, inner.inner->pool, 0);
-        inner.in_use = false;
+        // inner.in_use = 0;
     }
 
     VkCommandBuffer& operator*() const { return inner.inner->buffer; }

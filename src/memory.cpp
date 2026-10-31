@@ -12,6 +12,7 @@ using namespace detail;
 
 VkDevice vk_device;
 VkQueue transfer_queue;
+mutex transfer_queue_mutex;
 VkSemaphore timeline_semaphore;
 VkBuffer download_buffer;
 
