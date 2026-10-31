@@ -10,6 +10,7 @@ using namespace std;
 namespace vram::memory {
 using namespace detail;
 
+bool shutdown{};
 VkDevice vk_device;
 VkQueue transfer_queue;
 mutex transfer_queue_mutex;
@@ -39,6 +40,7 @@ block::block() {
 }
 
 block::~block() {
+    if (shutdown) return;
     truncate(0);
     lock_guard lock{pool_lock};
     pool.push_back(buffer);

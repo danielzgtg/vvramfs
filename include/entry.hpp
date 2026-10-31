@@ -85,6 +85,7 @@ public:
     std::unordered_map<std::string, std::shared_ptr<entry_t>, sv_hash, std::equal_to<>> _children;
     std::shared_mutex children_rwlock;
     explicit dir_t();
+    ~dir_t() override;
 };
 
 class symlink_t : public entry_t {

@@ -5,6 +5,7 @@
 
 /// VRAM block allocation
 namespace vram::memory {
+extern bool shutdown;
 extern size_t device_num;
 extern int _pool_size;
 extern std::atomic_int32_t _pool_available;

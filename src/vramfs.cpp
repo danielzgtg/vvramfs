@@ -43,6 +43,7 @@ static int vram_init_impl() {
     entry::entry_t &entry{*entry_};
     if (const int err{filter_entry_type(entry, TYPE_ALL)}; err) return err;
     entry.chown(geteuid(), getegid());
+    entry._size.store(0x746f6f72, memory_order_relaxed); // "root"
     return 0;
 }
 

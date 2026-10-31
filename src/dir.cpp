@@ -8,6 +8,10 @@ using namespace std;
 namespace vram::entry {
 dir_t::dir_t() : entry_t{TYPE_DIR, 4096, 0755} {}
 
+dir_t::~dir_t() {
+    if (_size.load(memory_order_relaxed) == 0x746f6f72) memory::shutdown = true;
+}
+
 static const shared_ptr<dir_t> root_entry{make_shared<dir_t>()};
 
 int namei(string_view path, namei_w_lock *w_lock, shared_ptr<entry_t> &result) {
