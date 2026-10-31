@@ -23,6 +23,7 @@ enum type_t {
     TYPE_ALL = TYPE_FILE | TYPE_DIR | TYPE_SYMLINK,
 };
 
+static constexpr int MAX_ENTRY_COUNT = 4096;
 extern std::atomic_int entry_count;
 
 class entry_t : public std::enable_shared_from_this<entry_t> {
@@ -66,7 +67,6 @@ private:
 };
 
 struct namei_w_lock {
-    std::shared_lock<std::shared_mutex> r_lock_prev{};
     std::unique_lock<std::shared_mutex> w_lock{};
     dir_t *parent{};
 };

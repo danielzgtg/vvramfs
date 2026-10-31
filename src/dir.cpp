@@ -36,7 +36,8 @@ int namei(string_view path, namei_w_lock *w_lock, shared_ptr<entry_t> &result) {
             current_component = path;
             if (w_lock) {
                 w_lock->w_lock = unique_lock{parent->children_rwlock};
-                if (parent->_children.empty()) w_lock->r_lock_prev = std::move(r_lock_prev);
+                // Only empty directories can be removed, and that check will wait for w_lock, so don't need r_lock_prev
+                r_lock_prev.release();
                 w_lock->parent = parent;
             } else {
                 r_lock_cur = shared_lock{parent->children_rwlock};

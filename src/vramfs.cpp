@@ -55,12 +55,14 @@ static void* vram_init(fuse_conn_info *conn, fuse_config *cfg) {
 }
 
 static int vram_statfs(const char *, struct statvfs *vfs) {
-    vfs->f_bsize = memory::block::SIZE;
+    vfs->f_bsize = memory::DOWNLOAD_ARENA_BUF_SIZE;
+    vfs->f_frsize = memory::block::SIZE;
     vfs->f_blocks = memory::_pool_size;
     vfs->f_bfree = vfs->f_bavail = memory::_pool_available.load(memory_order_relaxed);
-    vfs->f_files = entry::entry_count.load(memory_order_relaxed);
-    vfs->f_ffree = std::numeric_limits<fsfilcnt_t>::max();
-    vfs->f_namemax = std::numeric_limits<unsigned long>::max();
+    const int entry_count{entry::entry_count.load(memory_order_relaxed)};
+    vfs->f_files = entry_count;
+    vfs->f_ffree = max(0, entry::MAX_ENTRY_COUNT - entry_count);
+    vfs->f_namemax = NAME_MAX;
     return 0;
 }
 
@@ -129,6 +131,13 @@ static void chown_from_fuse_context(entry::entry_t &entry) {
     entry.chown(context->uid, context->gid);
 }
 
+#define INCREMENT_ENTRY_COUNT_OR_RETURN() \
+    if (entry::entry_count.fetch_add(1, memory_order_relaxed) >= entry::MAX_ENTRY_COUNT) { \
+        entry::entry_count.fetch_sub(1, memory_order_relaxed); \
+        return -ENOSPC; \
+    } \
+    do {} while (0)
+
 #define PREP_CREAT_MUT_ENTRY_OR_RETURN(exist_ok) \
     const string_view path{path_}; \
     shared_ptr<entry::entry_t> entry_; \
@@ -153,6 +162,7 @@ static void chown_from_fuse_context(entry::entry_t &entry) {
     do {} while (0)
 
 static int vram_create(const char *path_, mode_t mode, fuse_file_info *fi) {
+    INCREMENT_ENTRY_COUNT_OR_RETURN();
     PREP_CREAT_MUT_ENTRY_OR_RETURN(/* .open handles existing files */ false);
     entry_ = make_shared<entry::file_t>(mode);
     LN_NEW_ENTRY(entry_);
@@ -161,6 +171,7 @@ static int vram_create(const char *path_, mode_t mode, fuse_file_info *fi) {
 }
 
 static int vram_mkdir(const char *path_, mode_t mode) {
+    INCREMENT_ENTRY_COUNT_OR_RETURN();
     PREP_CREAT_MUT_ENTRY_OR_RETURN(false);
     entry_ = make_shared<entry::dir_t>(mode);
     LN_NEW_ENTRY(entry_);
@@ -168,6 +179,7 @@ static int vram_mkdir(const char *path_, mode_t mode) {
 }
 
 static int vram_symlink(const char *target, const char *path_) {
+    INCREMENT_ENTRY_COUNT_OR_RETURN();
     PREP_CREAT_MUT_ENTRY_OR_RETURN(false);
     entry_ = make_shared<entry::symlink_t>(target);
     LN_NEW_ENTRY(entry_);
