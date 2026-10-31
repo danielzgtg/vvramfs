@@ -7,7 +7,7 @@
 using namespace std;
 
 namespace vram::entry {
-file_t::file_t() : entry_t{TYPE_FILE, 0, 0644} {}
+file_t::file_t(mode_t mode) : entry_t{TYPE_FILE, 0, mode} {}
 
 int file_t::truncate(size_t new_size) {
     if (new_size > MAX_FILE_SIZE) return -EINVAL;

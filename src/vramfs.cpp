@@ -86,7 +86,9 @@ static int vram_getattr(const char *path, struct stat *stbuf, fuse_file_info *) 
 static int vram_readlink(const char *path, char *buf, size_t size) {
     GET_ENTRY_OR_RETURN(TYPE_SYMLINK);
     entry.atime(util::time());
-    strncpy(buf, dynamic_cast<entry::symlink_t*>(&entry)->target.c_str(), size);
+    [[assume(size > 0)]];
+    const size_t end{string_view{dynamic_cast<entry::symlink_t*>(&entry)->target}.copy(buf, size - 1)};
+    buf[end] = '\0';
     return 0;
 }
 
@@ -130,50 +132,65 @@ static void chown_from_fuse_context(entry::entry_t &entry) {
 #define PREP_CREAT_MUT_ENTRY_OR_RETURN(exist_ok) \
     const string_view path{path_}; \
     shared_ptr<entry::entry_t> entry_; \
-    entry::namei_w_lock w_lock; \
+    entry::namei_w_lock w_lock{}; \
     const int err{entry::namei(path, &w_lock, entry_)}; \
     if (!w_lock.parent) return err; \
     if (!(exist_ok) && entry_) return -EEXIST; \
     do {} while (0)
 
-#define LN_ENTRY() \
-    chown_from_fuse_context(*entry_); \
-    w_lock.parent->_children[string{path.substr(path.rfind('/') + 1)}] = entry_; \
+#define LN_ENTRY(entry_) \
+    w_lock.parent->_children[string{path.substr(path.rfind('/') + 1)}] = (entry_); \
     w_lock.parent->mtime(util::time()); \
     do {} while (0)
+
+#define LN_NEW_ENTRY(entry_) \
+    chown_from_fuse_context(*(entry_)); \
+    LN_ENTRY((entry_))
 
 #define UNLINK_ENTRY() \
     w_lock.parent->_children.erase(w_lock.parent->_children.find(path.substr(path.rfind('/') + 1))); \
     w_lock.parent->mtime(util::time()); \
     do {} while (0)
 
-static int vram_create(const char *path_, mode_t, struct fuse_file_info *fi) {
-    PREP_CREAT_MUT_ENTRY_OR_RETURN(~fi->flags & O_EXCL);
-    if (entry_ && entry_->type != TYPE_FILE) return -EISDIR;
-    entry_ = make_shared<entry::file_t>();
-    LN_ENTRY();
+static int vram_create(const char *path_, mode_t mode, fuse_file_info *fi) {
+    PREP_CREAT_MUT_ENTRY_OR_RETURN(/* .open handles existing files */ false);
+    entry_ = make_shared<entry::file_t>(mode);
+    LN_NEW_ENTRY(entry_);
     fi->fh = reinterpret_cast<uint64_t>(new shared_ptr{dynamic_pointer_cast<entry::file_t>(std::move(entry_))});
     return 0;
 }
 
-static int vram_mkdir(const char *path_, mode_t) {
+static int vram_mkdir(const char *path_, mode_t mode) {
     PREP_CREAT_MUT_ENTRY_OR_RETURN(false);
-    entry_ = make_shared<entry::dir_t>();
-    LN_ENTRY();
+    entry_ = make_shared<entry::dir_t>(mode);
+    LN_NEW_ENTRY(entry_);
     return 0;
 }
 
 static int vram_symlink(const char *target, const char *path_) {
     PREP_CREAT_MUT_ENTRY_OR_RETURN(false);
     entry_ = make_shared<entry::symlink_t>(target);
-    LN_ENTRY();
+    LN_NEW_ENTRY(entry_);
+    return 0;
+}
+
+static int vram_unlink_impl(const string_view path, const entry::entry_t& entry, const entry::namei_w_lock &w_lock) {
+    if (!(entry.type & (TYPE_FILE | TYPE_SYMLINK))) return -EISDIR;
+    UNLINK_ENTRY();
     return 0;
 }
 
 static int vram_unlink(const char *path_) {
     PREP_CREAT_MUT_ENTRY_OR_RETURN(true);
     if (!entry_) return -ENOENT;
-    if (!(entry_->type & (TYPE_FILE | TYPE_SYMLINK))) return -EISDIR;
+    return vram_unlink_impl(path, *entry_, w_lock);
+}
+
+static int vram_rmdir_impl(const string_view path, entry::entry_t& entry, const entry::namei_w_lock &w_lock) {
+    if (~entry.type & TYPE_DIR) return -ENOTDIR;
+    auto &dir{dynamic_cast<entry::dir_t&>(entry)};
+    const shared_lock lock{dir.children_rwlock};
+    if (!dir._children.empty()) return -ENOTEMPTY;
     UNLINK_ENTRY();
     return 0;
 }
@@ -181,47 +198,57 @@ static int vram_unlink(const char *path_) {
 static int vram_rmdir(const char *path_) {
     PREP_CREAT_MUT_ENTRY_OR_RETURN(true);
     if (!entry_) return -ENOENT;
-    if (~entry_->type & TYPE_DIR) return -ENOTDIR;
-    entry::dir_t &dir{*dynamic_cast<entry::dir_t*>(&*entry_)};
-    const shared_lock lock{dir.children_rwlock};
-    if (!dir._children.empty()) return -ENOTEMPTY;
-    UNLINK_ENTRY();
-    return 0;
+    return vram_rmdir_impl(path, *entry_, w_lock);
 }
 
-static int vram_rename_finish(shared_ptr<entry::entry_t> &movend, const char *path_, bool no_replace) {
-    PREP_CREAT_MUT_ENTRY_OR_RETURN(!no_replace);
-    if (entry_ && entry_->type != TYPE_FILE) return -EISDIR;
-    entry_ = std::move(movend);
-    LN_ENTRY();
-    return 0;
-}
+// Approach #3: Acquire locks repeatedly, and use placeholders. This is deadlock-free, atomic, and avoids cycles.
+// This is complex enough. Reimplementing namei would be involved in potentially avoiding the locks sometimes.
+static mutex parent_dirs_rename_mutex{};
 
 static int vram_rename(const char *old_path, const char *new_path, unsigned int flags) {
     if (flags & ~RENAME_NOREPLACE) return -EINVAL;
-    {
-        // Early check to return better error code
-        // Kernel already handles error code for mountpoint dir and non-racy nested dir cycles
+    // Kernel already handles error code for mountpoint dir and non-racy nested dir cycles
+    { // Quality-of-life only improvement to return specific ENOENT instead of EINVAL error code
+        const auto path{old_path};
+        GET_ENTRY_OR_RETURN(TYPE_ALL);
+    }
+    const unique_lock parent_dirs_rename_lock{parent_dirs_rename_mutex};
+    { // Add placeholder to avoid a race causing us to need to remove entries
         const auto path_{new_path};
-        PREP_CREAT_MUT_ENTRY_OR_RETURN(false);
-    }
-    shared_ptr<entry::entry_t> movend;
-    {
-        const auto path_{old_path};
-        PREP_CREAT_MUT_ENTRY_OR_RETURN(true);
-        if (!entry_) return -ENOENT;
-        UNLINK_ENTRY();
-        movend = std::move(entry_);
-    }
-    if (const int err{vram_rename_finish(movend, new_path, flags & RENAME_NOREPLACE)}) {
-        if (vram_rename_finish(movend, old_path, true)) {
-            cerr << "Dangling entry after failed rename\n";
+        PREP_CREAT_MUT_ENTRY_OR_RETURN(flags & RENAME_NOREPLACE);
+        if (!entry_) {
+            // OK
+        } else if (entry_->type & TYPE_DIR) {
+            if (const int err_{vram_rmdir_impl(path, *entry_, w_lock)}) return err_;
+        } else if (entry_->type & (TYPE_FILE | TYPE_SYMLINK)) {
+            if (const int err_{vram_unlink_impl(path, *entry_, w_lock)}) return err_;
+        } else { // TYPE_RENAME_PLACEHOLDER
+            return -EPERM;
         }
-        return err == -ENOENT ? -EINVAL : err;
+        LN_ENTRY(entry::RENAME_PLACEHOLDER_INSTANCE);
+    }
+    {
+        shared_ptr<entry::entry_t> movend;
+        const int unlink_err{
+            [&] {
+                const auto path_{old_path};
+                PREP_CREAT_MUT_ENTRY_OR_RETURN(true);
+                if (!entry_) return -ENOENT;
+                if (!(entry_->type & TYPE_ALL)) return -EPERM; // TYPE_RENAME_PLACEHOLDER
+                movend = std::move(entry_);
+                UNLINK_ENTRY();
+                return 0;
+            }()
+        };
+        const auto path_{new_path};
+        PREP_CREAT_MUT_ENTRY_OR_RETURN(true); // Should always succeed and return our placeholder as entry_
+        if (unlink_err) {
+            UNLINK_ENTRY();
+            return unlink_err == -ENOENT ? -EINVAL : unlink_err;
+        }
+        LN_ENTRY(movend); // Overwrite placeholder
     }
     return 0;
-    // This isn't atomic but I'd rather not duplicate namei
-    // But server-side, it's safer than the previous code allowing racily moving directories into themselves
 }
 
 static int vram_open(const char *path, fuse_file_info *fi) {
@@ -328,5 +355,6 @@ int main(int argc, char *argv[]) {
     fuse_opt_add_arg(&args, "-oauto_unmount"); // Properly unmount even on crash
     fuse_opt_add_arg(&args, "-odefault_permissions"); // Let FUSE and the kernel deal with permissions handling
     fuse_opt_add_arg(&args, "-f"); // GPU driver acts funky if program doesn't keep running in foreground
+    // fuse_opt_add_arg(&args, "-s");
     return fuse_main(args.argc, args.argv, &operations, nullptr);
 }

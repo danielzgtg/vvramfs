@@ -6,7 +6,7 @@ using namespace std;
 namespace vram::entry {
 atomic_int entry_count = 0;
 
-entry_t::entry_t(type_t type_, size_t size_, mode_t mode_)
+entry_t::entry_t(const type_t type_, const size_t size_, const mode_t mode_)
     : type{type_}, _size{size_}, _mode{mode_ & 0777}, btime{util::time()}, _atime{btime}, _mtime{btime}, _ctime{btime} {
     entry_count.fetch_add(1, memory_order_relaxed);
 }

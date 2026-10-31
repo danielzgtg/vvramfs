@@ -1,18 +1,23 @@
+#include <ranges>
 #include <utility>
 
 #include "entry.hpp"
-#include "util.hpp"
 
 using namespace std;
 
 namespace vram::entry {
-dir_t::dir_t() : entry_t{TYPE_DIR, 4096, 0755} {}
+dir_t::dir_t(mode_t mode) : entry_t{TYPE_DIR, 4096, mode} {}
 
 dir_t::~dir_t() {
-    if (_size.load(memory_order_relaxed) == 0x746f6f72) memory::shutdown = true;
+    if (_size.load(memory_order_relaxed) == 0x746f6f72) { // mountpoint root dir
+        shared_lock lock{children_rwlock};
+        for (const auto &child : _children | views::values) {
+            new shared_ptr{child}; // Must skip destructor at shutdown to avoid race with GPU destruction
+        }
+    }
 }
 
-static const shared_ptr<dir_t> root_entry{make_shared<dir_t>()};
+static const auto root_entry{make_shared<dir_t>(0755)};
 
 int namei(string_view path, namei_w_lock *w_lock, shared_ptr<entry_t> &result) {
     path.remove_prefix(1);

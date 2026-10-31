@@ -29,7 +29,7 @@ public:
     void write(size_t offset, size_t size, const void *data);
     void truncate(size_t size);
 private:
-    detail::vram_buffer *buffer;
-    block();
+    const std::reference_wrapper<detail::vram_buffer> buffer;
+    explicit block(std::reference_wrapper<detail::vram_buffer> buffer_);
 };
 }

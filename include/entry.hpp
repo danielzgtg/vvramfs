@@ -16,7 +16,7 @@ class dir_t;
 class symlink_t;
 
 enum type_t {
-    TYPE_NONE = 0,
+    TYPE_RENAME_PLACEHOLDER = 1,
     TYPE_FILE = S_IFREG,
     TYPE_DIR = S_IFDIR,
     TYPE_SYMLINK = S_IFLNK,
@@ -56,7 +56,7 @@ public:
     int truncate(size_t new_size);
     int read(off_t off, size_t size, char *data);
     int write(off_t off, size_t size, const char *data);
-    explicit file_t();
+    explicit file_t(mode_t mode);
 private:
     bmap_t bmap;
     std::shared_mutex bmap_rwlock;
@@ -66,9 +66,9 @@ private:
 };
 
 struct namei_w_lock {
-    std::shared_lock<std::shared_mutex> r_lock_prev;
-    std::unique_lock<std::shared_mutex> w_lock;
-    dir_t *parent;
+    std::shared_lock<std::shared_mutex> r_lock_prev{};
+    std::unique_lock<std::shared_mutex> w_lock{};
+    dir_t *parent{};
 };
 
 int namei(std::string_view path, namei_w_lock *w_lock, std::shared_ptr<entry_t> &result);
@@ -80,11 +80,10 @@ struct sv_hash {
 };
 
 class dir_t : public entry_t {
-    friend class entry_t;
 public:
     std::unordered_map<std::string, std::shared_ptr<entry_t>, sv_hash, std::equal_to<>> _children;
     std::shared_mutex children_rwlock;
-    explicit dir_t();
+    explicit dir_t(mode_t mode);
     ~dir_t() override;
 };
 
@@ -93,4 +92,11 @@ public:
     const std::string target;
     explicit symlink_t(const std::string &target);
 };
+
+class rename_placeholder_t : public entry_t {
+public:
+    explicit rename_placeholder_t();
+};
+
+extern const std::shared_ptr<entry_t> RENAME_PLACEHOLDER_INSTANCE;
 }

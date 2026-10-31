@@ -25,7 +25,7 @@ struct vram_buffer {
 };
 
 extern uint32_t host_memory_type;
-extern std::vector<vram_buffer*> pool;
+extern std::vector<std::reference_wrapper<vram_buffer>> pool;
 extern std::mutex pool_lock;
 }
 

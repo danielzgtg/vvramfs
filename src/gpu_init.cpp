@@ -10,7 +10,7 @@ static uint32_t device_memory_type;
 
 namespace detail {
 uint32_t host_memory_type;
-vector<vram_buffer*> pool;
+vector<reference_wrapper<vram_buffer>> pool;
 mutex pool_lock{};
 }
 
@@ -92,7 +92,7 @@ void gpu_init(size_t size) {
     if (!~device_memory_type) abort();
     host_memory_type = ~uint32_t{};
     for (const auto [i, memory_type] : memory_properties.memoryTypes | views::as_const | views::take(memory_properties.memoryTypeCount) | views::enumerate) {
-        if (~memory_type.propertyFlags & (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT)) continue;
+        if (~memory_type.propertyFlags & (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT)) continue;
         host_memory_type = i;
         break;
     }
@@ -131,10 +131,10 @@ void gpu_init(size_t size) {
         if (vkMapMemory(vk_device, device_memory, 0, block::SIZE, 0, &buf) != VK_SUCCESS) abort();
         vkBindBufferMemory(vk_device, vk_buffer, device_memory, 0);
         clear_buffer(vk_buffer, 0, block::SIZE);
-        pool.push_back(new vram_buffer{
+        pool.push_back(ref(*new vram_buffer{
             .mmap = buf,
             .vk = vk_buffer,
-        });
+        }));
     }
     _pool_available.store(_pool_size, memory_order_relaxed);
     {
