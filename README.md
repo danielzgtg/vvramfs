@@ -71,7 +71,7 @@ buffers is created and initialised with zeros. That is not just a good practice,
 but it's also required with some Vulkan drivers to check if the VRAM required
 for the block is actually available.
 
-To copy CPU–GPU, we use the fast way of uncached-mmap GPU VRAM onto the host then `memcpy` as if it was regular RAM, nicely avoiding dealing with creating queues and synchronizing copies. GPU hotplug/loss shall be undefined behavior. To copy GPU–CPU, `memcpy` is painfully slow, so we needed to actually keep using Vulkan and task the GPU's DMA engines. The big picture is that the writer, i.e. whichever side is the data's origin, should "push" the data contiguously, not having the reader "pull" it piece by piece.
+To copy CPU–GPU, we use the fast way of uncached-mmap GPU VRAM onto the host then `memcpy` as if it was regular RAM, nicely avoiding dealing with creating queues and synchronizing copies. GPU hotplug/loss shall be undefined behavior. To copy GPU–CPU, `memcpy` is painfully slow, so we needed to actually keep using Vulkan and task the GPU's DMA engines. The big picture is that the writer, i.e. whichever side is the data's origin, should "push" the data contiguously, not having the reader "pull" it piece by piece. To work around a `writev(2)` quirk degrading `mmap`-backed read performance, we should still perform a final `memcpy` to a `malloc`ed buffer, e.g. the buffer libfuse3's provides for `.read`.
 
 Block objects are managed using a `shared_ptr` so that they can automatically
 reinsert themselves into the pool on deconstruction.
@@ -119,6 +119,8 @@ The system used for testing has the following specifications:
 * **CPU:** AMD Ryzen 9 5900X
 * **RAM:** 32 GB DDR4-3600
 * **GPU:** AMD Radeon RX 6650 XT
+* `VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation`
+* Default libfuse3 worker count i.e. 10
 
 Performance has been measured:
 
@@ -128,8 +130,12 @@ Performance has been measured:
 * `dd if=/tmp/test of=/tmp/vram/test bs=1M count=1024 oflag=dsync`: 1.9 GB/s
 * `dd if=/dev/urandom of=/tmp/vram/test bs=1M count=1024 oflag=dsync`: 429 MB/s
 * `dd if=/tmp/vram/test of=/dev/null bs=1M count=1024 oflag=dsync`: 2.9 GB/s
+* `fio --filename=/tmp/vram/test --rw=read --bs=1M --numjobs=10 --name=test --time_based --runtime=30 --ioengine=libaio`: 10.4GB/s
+* `fio --filename=/tmp/vram/test --rw=randread --bs=1M --numjobs=10 --name=test --time_based --runtime=30 --ioengine=libaio`: 10.4GB/s
+* `fio --filename=/tmp/vram/test --rw=randrw --bs=1M --numjobs=10 --name=test --time_based --runtime=30 --ioengine=libaio`: 6898MB/s read, 6899MB/s write
+* `fio --filename=/tmp/vram/test --rw=write --bs=1M --numjobs=10 --name=test --time_based --runtime=30 --ioengine=libaio`: 9588MB/s
 
-Regular ramdisk comparison:
+The 10-thread performance exceeds a PCIe 4 x4 lane SSD. The 1-thread already surpasses 1-line PCIe 4 and is comparable to a regular tmpfs ramdisk's performance:
 
 * `dd if=/tmp/test of=/tmp/test2 bs=1M count=1024 oflag=dsync`: 1.7 GB/s
 * `dd if=/dev/urandom of=/tmp/test bs=1M count=1024 oflag=dsync`: 420 MB/s
@@ -137,6 +143,10 @@ Regular ramdisk comparison:
 * vvramfs mmap-not-malloc no-GPU-submit `dd if=/tmp/vram/test of=/dev/null bs=1M count=1024 oflag=dsync`: 1.6 GB/s
 * vvramfs no-GPU-submit a.k.a libfuse3 overhead only `dd if=/tmp/vram/test of=/dev/null bs=1M count=1024 oflag=dsync`: 5.9 GB/s
 * vvramfs no-GPU-await `dd if=/tmp/vram/test of=/dev/null bs=1M count=1024 oflag=dsync`: 5.3 GB/s
+* `fio --filename=/tmp/test --rw=read --bs=1M --numjobs=10 --name=test --time_based --runtime=30 --ioengine=libaio`: 31.6GB/s
+* `fio --filename=/tmp/test --rw=randread --bs=1M --numjobs=10 --name=test --time_based --runtime=30 --ioengine=libaio`: 30.2GB/s
+* `fio --filename=/tmp/test --rw=randrw --bs=1M --numjobs=10 --name=test --time_based --runtime=30 --ioengine=libaio`: 8343MB/s read, 8337MB/s write
+* `fio --filename=/tmp/test --rw=write --bs=1M --numjobs=10 --name=test --time_based --runtime=30 --ioengine=libaio`: 9681MB/s
 
 License
 -------
