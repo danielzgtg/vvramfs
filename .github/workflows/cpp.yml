@@ -1,0 +1,22 @@
+name: C++ CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-26.04
+    steps:
+    - uses: awalsh128/cache-apt-pkgs-action@v1
+      with:
+        packages: libfuse3-dev libvulkan-dev
+        version: 1.1
+    - uses: actions/checkout@v7
+    - run: make -j4
+    - uses: actions/upload-artifact@v7
+      with:
+        path: bin/vvramfs
+        if-no-files-found: error
