@@ -1,6 +1,5 @@
 #include <ranges>
 #include <sys/mman.h>
-#include <sys/user.h>
 
 #include "memory_vulkan.hpp"
 
@@ -13,12 +12,9 @@ namespace detail {
 uint32_t host_memory_type;
 vector<vram_buffer*> pool;
 mutex pool_lock{};
-PFN_vkGetMemoryHostPointerPropertiesEXT pfn_vk_get_memory_host_pointer_properties_ext;
 }
 
 using namespace detail;
-
-#define DEBUG_REPLACE_VRAM_WITH_RAM 0
 
 void gpu_init(size_t size) {
     if (vk_device || !size || size % block::SIZE || size > INT16_MAX * block::SIZE) abort();
@@ -41,18 +37,11 @@ void gpu_init(size_t size) {
     if (vkEnumeratePhysicalDevices(vk_instance, &physical_device_count, physical_devices.data()) != VK_SUCCESS) abort();
     VkPhysicalDevice physical_device{};
     {
-        VkPhysicalDeviceExternalMemoryHostPropertiesEXT memory_host_properties_ext{
-            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_MEMORY_HOST_PROPERTIES_EXT,
-        };
-        VkPhysicalDeviceProperties2 physical_device_properties2{
-            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
-            .pNext = &memory_host_properties_ext,
-        };
+        VkPhysicalDeviceProperties physical_device_properties;
         for (const auto [i, device] : physical_devices | views::as_const | views::enumerate) {
             if (~device_num && i != device_num) continue;
-            vkGetPhysicalDeviceProperties2(device, &physical_device_properties2);
-            if (physical_device_properties2.properties.deviceType != VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) continue;
-            if (memory_host_properties_ext.minImportedHostPointerAlignment > PAGE_SIZE) abort();
+            vkGetPhysicalDeviceProperties(device, &physical_device_properties);
+            if (physical_device_properties.deviceType != VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) continue;
             physical_device = device;
             break;
         }
@@ -84,16 +73,11 @@ void gpu_init(size_t size) {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
         .timelineSemaphore = VK_TRUE,
     };
-    static constexpr array<const char*, 1> extension_names{
-        VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME,
-    };
     const VkDeviceCreateInfo device_create_info{
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
         .pNext = &vulkan12_features,
         .queueCreateInfoCount = 1,
         .pQueueCreateInfos = &queue_create_info,
-        .enabledExtensionCount = 1,
-        .ppEnabledExtensionNames = extension_names.data(),
     };
     if (vkCreateDevice(physical_device, &device_create_info, nullptr, &vk_device) != VK_SUCCESS) abort();
     vkGetDeviceQueue(vk_device, transfer_family, 0, &transfer_queue);
@@ -122,7 +106,6 @@ void gpu_init(size_t size) {
         .pNext = &semaphore_type_create_info,
     };
     if (vkCreateSemaphore(vk_device, &semaphore_create_info, nullptr, &timeline_semaphore) != VK_SUCCESS) abort();
-    pfn_vk_get_memory_host_pointer_properties_ext = reinterpret_cast<PFN_vkGetMemoryHostPointerPropertiesEXT>(vkGetDeviceProcAddr(vk_device, "vkGetMemoryHostPointerPropertiesEXT"));
     _pool_size = static_cast<int>(size / block::SIZE);
     lock_guard lock{pool_lock};
     for (auto _ : views::iota(int{}, _pool_size)) {
@@ -143,16 +126,11 @@ void gpu_init(size_t size) {
             .memoryTypeIndex = device_memory_type,
         };
         void *buf;
-#if DEBUG_REPLACE_VRAM_WITH_RAM
-        vk_buffer = nullptr;
-        buf = calloc(1, block::SIZE);
-#else
         VkDeviceMemory device_memory;
         if (vkAllocateMemory(vk_device, &memory_allocate_info, nullptr, &device_memory) != VK_SUCCESS) abort();
         if (vkMapMemory(vk_device, device_memory, 0, block::SIZE, 0, &buf) != VK_SUCCESS) abort();
         vkBindBufferMemory(vk_device, vk_buffer, device_memory, 0);
         clear_buffer(vk_buffer, 0, block::SIZE);
-#endif
         pool.push_back(new vram_buffer{
             .mmap = buf,
             .vk = vk_buffer,
