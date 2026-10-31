@@ -49,8 +49,8 @@ block::~block() {
 }
 
 void *download_arena_start{};
-atomic_uint download_arena_locks_head{};
-atomic_bool download_arena_locks[DOWNLOAD_ARENA_BUF_COUNT]{};
+static atomic_uint download_arena_locks_head{};
+static atomic_bool download_arena_locks[DOWNLOAD_ARENA_BUF_COUNT]{};
 
 void block::read(size_t offset, size_t size, void *data) const {
     if (offset > SIZE || size > SIZE || offset + size > SIZE) abort();

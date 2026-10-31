@@ -42,8 +42,7 @@ static int read_cb1(shared_ptr<memory::block> &orig_block, size_t block_idx, siz
 }
 
 static int read_cb2(shared_ptr<memory::block> &, size_t block_idx, size_t block_off, size_t io_size, char *data, bmap_t &bmap_dup) {
-    shared_ptr<memory::block> &block = bmap_dup[block_idx];
-    if (block) {
+    if (const shared_ptr<memory::block> &block{bmap_dup[block_idx]}) {
         block->read(block_off, io_size, data);
     } else {
         // Non-written part of file
@@ -54,7 +53,7 @@ static int read_cb2(shared_ptr<memory::block> &, size_t block_idx, size_t block_
 
 int file_t::read(off_t off, size_t size, char *data) {
     const size_t _size_ = _size.load(memory_order_relaxed);
-    if ((size_t)off >= _size_) return 0;
+    if (static_cast<size_t>(off) >= _size_) return 0;
     size = min(_size_ - off, size);
     bmap_t bmap_dup{};
     {
