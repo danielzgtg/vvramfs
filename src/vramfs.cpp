@@ -340,12 +340,14 @@ static size_t parse_size(const string &param) {
     size_t size{};
     const auto [ptr, ec] = from_chars(param.data(), param.data() + param.size(), size);
     if (ec != errc{}) abort();
-    if (const string_view rest{ptr}; rest == "K") size *= 1024UL;
+    if (const string_view rest{ptr}; !rest.empty() && size > ~size_t() / 1024UL / 1024UL / 1024UL) abort(); // NOLINT(*-branch-clone)
+    else if (rest == "K") size *= 1024UL;
     else if (rest == "KB") size *= 1000UL;
     else if (rest == "M") size *= 1024UL * 1024UL;
     else if (rest == "MB") size *= 1000UL * 1000UL;
     else if (rest == "G") size *= 1024UL * 1024UL * 1024UL;
     else if (rest == "GB") size *= 1000UL * 1000UL * 1000UL;
+    else if (!rest.empty()) abort();
     return size;
 }
 
