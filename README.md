@@ -122,18 +122,20 @@ The system used for testing has the following specifications:
 Performance has been measured:
 
 * `dd if=/dev/zero of=/tmp/vram/test bs=1M count=1024 oflag=dsync`
-    * Existing files: 4.3 GB/s
-    * First launch: 724 MB/s
-* `dd if=/tmp/test of=/tmp/vram/test bs=1M count=1024 oflag=dsync`: 1.9 GB/s
-* `dd if=/dev/urandom of=/tmp/vram/test bs=1M count=1024 oflag=dsync`: 429 MB/s
+    * Existing files: 4.1 GB/s
+    * First launch: 737 MB/s
+* `dd if=/tmp/test of=/tmp/vram/test bs=1M count=1024 oflag=dsync`: 2.0 GB/s
+* `dd if=/dev/urandom of=/tmp/vram/test bs=1M count=1024 oflag=dsync`: 425 MB/s
 * `dd if=/tmp/vram/test of=/dev/null bs=1M count=1024 oflag=dsync`: 2.9 GB/s
-* `fio --filename=/tmp/vram/test --rw=read --bs=1M --numjobs=10 --name=test --time_based --runtime=30 --ioengine=libaio`: 10.4GB/s
-* `fio --filename=/tmp/vram/test --rw=randread --bs=1M --numjobs=10 --name=test --time_based --runtime=30 --ioengine=libaio`: 10.4GB/s
-* `fio --filename=/tmp/vram/test --rw=randrw --bs=1M --numjobs=10 --name=test --time_based --runtime=30 --ioengine=libaio`: 6898MB/s read, 6899MB/s write
-* `fio --filename=/tmp/vram/test --rw=write --bs=1M --numjobs=10 --name=test --time_based --runtime=30 --ioengine=libaio`: 9588MB/s
+* `fio --filename=/tmp/vram/test --rw=read --bs=1M --numjobs=10 --name=test --time_based --runtime=30 --ioengine=libaio`: 10.2GB/s
+* `fio --filename=/tmp/vram/test --rw=randread --bs=1M --numjobs=10 --name=test --time_based --runtime=30 --ioengine=libaio`: 10.3GB/s
+* `fio --filename=/tmp/vram/test --rw=randrw --bs=1M --numjobs=10 --name=test --time_based --runtime=30 --ioengine=libaio`: 7259MB/s read, 7255MB/s write
+* `fio --filename=/tmp/test --rw=randrw --bsrange=4k-1M --name=test --time_based --runtime=30 --ioengine=libaio --verify_state_save=0 --verify=crc32c --verify_fatal=1`: Passed
+* `fio --filename=/tmp/vram/test --rw=write --bs=1M --numjobs=10 --name=test --time_based --runtime=30 --ioengine=libaio`: 11.1GB/s
 
 The 10-thread performance exceeds a PCIe 4 x4 lane SSD. The 1-thread already surpasses 1-line PCIe 4 and is comparable to a regular tmpfs ramdisk's performance:
 
+* `dd if=/dev/zero of=/tmp/test bs=1M count=1024 oflag=dsync`: 3.3 GB/s
 * `dd if=/tmp/test of=/tmp/test2 bs=1M count=1024 oflag=dsync`: 1.7 GB/s
 * `dd if=/dev/urandom of=/tmp/test bs=1M count=1024 oflag=dsync`: 420 MB/s
 * `dd if=/tmp/test of=/dev/null bs=1M count=1024 oflag=dsync`: 3.7 GB/s

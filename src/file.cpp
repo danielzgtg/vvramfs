@@ -65,7 +65,15 @@ int file_t::read(off_t off, size_t size, char *data) {
     return static_cast<int>(size); // max MAX_FILE_SIZE
 }
 
-static int write_cb1(shared_ptr<memory::block> &orig_block, size_t block_idx, size_t, size_t, char *, bmap_t &bmap_dup) {
+static int write_cb1_shared(shared_ptr<memory::block> &orig_block, size_t block_idx, size_t, size_t, char *, bmap_t &bmap_dup) {
+    if (!orig_block) {
+        return -EBADF;
+    }
+    bmap_dup[block_idx] = orig_block;
+    return 0;
+}
+
+static int write_cb1_unique(shared_ptr<memory::block> &orig_block, size_t block_idx, size_t, size_t, char *, bmap_t &bmap_dup) {
     if (!orig_block) {
         orig_block = memory::allocate();
         if (!orig_block) return -ENOSPC;
@@ -76,7 +84,7 @@ static int write_cb1(shared_ptr<memory::block> &orig_block, size_t block_idx, si
 
 static int write_cb2(shared_ptr<memory::block> &, size_t block_idx, size_t block_off, size_t io_size, char *data_, bmap_t &bmap_dup) {
     const char *data{data_};
-    shared_ptr<memory::block> &block = bmap_dup[block_idx];
+    const shared_ptr<memory::block> &block = bmap_dup[block_idx];
     if (!block) abort();
     block->write(block_off, io_size, data);
     return 0;
@@ -85,9 +93,17 @@ static int write_cb2(shared_ptr<memory::block> &, size_t block_idx, size_t block
 int file_t::write(off_t off, size_t size, const char *data) {
     if (!size) return 0;
     bmap_t bmap_dup{};
-    const unique_lock lock{bmap_rwlock};
-    size = bmap_walk(off, size, const_cast<char*>(data), write_cb1, bmap_dup);
-    if (!size) return -ENOSPC;
+    size_t new_size;
+    {
+        const shared_lock lock{bmap_rwlock};
+        new_size = bmap_walk(off, size, const_cast<char*>(data), write_cb1_shared, bmap_dup);
+    }
+    if (new_size != size) {
+        const unique_lock lock{bmap_rwlock};
+        new_size = bmap_walk(off, size, const_cast<char*>(data), write_cb1_unique, bmap_dup);
+    }
+    if (!new_size) return -ENOSPC;
+    size = new_size;
     bmap_walk(off, size, const_cast<char*>(data), write_cb2, bmap_dup);
     if (_size.load(memory_order_relaxed) < size + off) _size.store(size + off, memory_order_relaxed);
     mtime(util::time());
