@@ -1,22 +1,28 @@
 CXX ?= g++
-CXXFLAGS += -std=c++23 -march=native -O3 $(shell pkg-config fuse3 --cflags) -I include/
-LDFLAGS += $(shell pkg-config fuse3 vulkan --libs) -latomic
+CXXFLAGS += $(shell pkg-config fuse3 --cflags) -flto -I include/ -march=x86-64-v3 -std=c++23 -Wall -Werror
+LDFLAGS += $(shell pkg-config fuse3 vulkan --libs) -flto -latomic
 
-#CXXFLAGS += -g -DDEBUG -Wall -Werror
-#CXXFLAGS += -g
+.PHONY: all clean debug release
 
-.PHONY: all
-all: bin/vvramfs
+ifeq ($(BUILD),release)
+    CXXFLAGS += -DNDEBUG -O3
+    all: bin/vvramfs
+else
+    CXXFLAGS += -g
+    all: bin/vvramfs_unstripped
+endif
 
-bin/vvramfs: build/command_pool.o build/dir.o build/entry.o build/file.o build/gpu_init.o build/memory.o build/symlink.o build/util.o build/vramfs.o | bin
+bin/vvramfs: bin/vvramfs_unstripped
+	strip --strip-all -o $@ $^
+
+bin/vvramfs_unstripped: build/command_pool.o build/dir.o build/entry.o build/file.o build/gpu_init.o build/memory.o build/symlink.o build/util.o build/vramfs.o | bin
 	$(CXX) -o $@ $^ $(LDFLAGS)
 
 build bin:
 	@mkdir -p $@
 
-build/%.o: src/%.cpp | build
+build/%.o: src/%.cpp $(wildcard include/*.hpp) | build
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
-.PHONY: clean
 clean:
 	rm -rf build/ bin/

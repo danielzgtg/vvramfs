@@ -20,7 +20,7 @@ int file_t::truncate(size_t new_size) {
 
 size_t file_t::bmap_walk(off_t off_, const size_t size, char *data, bmap_cb cb, bmap_t &bmap_dup) {
     if (off_ < 0 || size > memory::DOWNLOAD_ARENA_BUF_SIZE) abort();
-    if (off_ > MAX_FILE_SIZE) return 0;
+    if (off_ > static_cast<off_t>(MAX_FILE_SIZE)) return 0;
     size_t off = off_;
     const size_t end_pos = min(off + size, MAX_FILE_SIZE);
     while (off < end_pos) {

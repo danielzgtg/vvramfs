@@ -6,7 +6,7 @@
 /// VRAM block allocation
 namespace vram::memory {
 extern bool shutdown;
-extern size_t device_num;
+extern uint device_num;
 extern int _pool_size;
 extern std::atomic_int32_t _pool_available;
 static constexpr size_t DOWNLOAD_ARENA_BUF_SIZE = 1024UL * 1024UL;

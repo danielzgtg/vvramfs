@@ -367,6 +367,8 @@ int main(int argc, char *argv[]) {
     fuse_opt_add_arg(&args, "-oauto_unmount"); // Properly unmount even on crash
     fuse_opt_add_arg(&args, "-odefault_permissions"); // Let FUSE and the kernel deal with permissions handling
     fuse_opt_add_arg(&args, "-f"); // GPU driver acts funky if program doesn't keep running in foreground
-    // fuse_opt_add_arg(&args, "-s");
+#ifndef NDEBUG
+    fuse_opt_add_arg(&args, "-s");
+#endif
     return fuse_main(args.argc, args.argv, &operations, nullptr);
 }

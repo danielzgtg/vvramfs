@@ -22,7 +22,7 @@ VkCommandPoolCreateInfo pool_create_info{
     .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
 };
 
-size_t device_num = ~size_t{};
+uint device_num = ~uint{};
 int _pool_size{};
 atomic_int32_t _pool_available{};
 
