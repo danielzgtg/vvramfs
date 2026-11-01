@@ -148,6 +148,13 @@ The 10-thread performance exceeds a PCIe 4 x4 lane SSD. The 1-thread already sur
 * `fio --filename=/tmp/test --rw=randrw --bs=1M --numjobs=10 --name=test --time_based --runtime=30 --ioengine=libaio`: 8343MB/s read, 8337MB/s write
 * `fio --filename=/tmp/test --rw=write --bs=1M --numjobs=10 --name=test --time_based --runtime=30 --ioengine=libaio`: 9681MB/s
 
+Alternative Projects
+-------
+* https://github.com/Overv/vramfs : The OG. My Vulkan port should be 1 GB/s faster and easier to install on AMD systems
+* https://github.com/c0deJedi/nbd-vram : NBD-VRAM reports a 2.7 GB/s read speed on their hardware, which is 0.2 GB/s less than vvramfs on mine.
+* https://github.com/emersonbusson/ramshared : Their `ramshared top` screenshot reports only 591 MB/s. But maybe vvramfs should move from FUSE to ublk to avoid reinventing the wheel poorly for filesystem metadata management.
+* https://wiki.archlinux.org/title/Swap_on_video_RAM#MTD_Kernel_Subsystem : No reported benchmarks, but probably faster at least for writes. But has a warning about delicate kernel and Xorg configuration
+
 License
 -------
 

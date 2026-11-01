@@ -74,7 +74,7 @@ void block::read(size_t offset, size_t size, void *data) const {
     {
         // Odd-numbered offsets work fine on my AMD RLX 6650 XT GPU. Vulkan does not require a multiple of 4 here.
         // Only non-compliant unofficial drivers for Apple GPUs might require that.
-        copy_buffer(buffer.get().vk, download_buffer, offset, reinterpret_cast<uintptr_t>(mem) - reinterpret_cast<uintptr_t>(start), size);
+        copy_buffer(buffer.get().vk, download_buffer, offset, DOWNLOAD_ARENA_BUF_SIZE * download_arena_i, size);
         memcpy(data, mem, size);
     }
     download_arena_locks[download_arena_i].store(false, memory_order_release);

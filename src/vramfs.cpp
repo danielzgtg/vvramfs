@@ -3,8 +3,10 @@
 #include <filesystem>
 #include <fuse.h>
 #include <iostream>
+#include <linux/prctl.h>
 #include <ranges>
 #include <sys/mman.h>
+#include <sys/prctl.h>
 #include <unistd.h>
 
 #include "entry.hpp"
@@ -360,6 +362,7 @@ int main(int argc, char *argv[]) {
         if (!(iss >> memory::device_num) || !iss.eof()) abort();
     }
     if (mlockall(MCL_CURRENT | MCL_FUTURE)) cerr << "failed to lock process pages in memory, vramfs may freeze if swapped" << endl;
+    if (prctl(PR_SET_IO_FLUSHER, true, 0L, 0L, 0L)) cerr << "PR_SET_IO_FLUSHER failed, vramfs may freeze if swapped" << endl;
     cout << "allocating vram..." << endl;
     memory::gpu_init(disk_size);
     fuse_args args = FUSE_ARGS_INIT(2, argv);
