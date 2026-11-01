@@ -103,12 +103,9 @@ modification and change times at the appropriate moment. For example, calling
 the `children` member function of `dir_t` changes the access time and change
 time of the directory.
 
-#### Thread safety
+#### Multithreading
 
-Unfortunately most of the operations are not thread safe, so all of the FUSE
-callbacks share a mutex to ensure that only one thread is mutating the file
-system at a time. The exceptions are `read` and `write`, which will temporarily
-release the lock while waiting for a read or write to complete.
+The only remaining mutexes are for `rename`, block allocation, and the actual GPU queue submission. These are mostly unavoidable in any implementation. Everything else uses mostly reader-writer locks, and atomics in some places. In normal operation, our `pread` and `pwrite` are not expected to block on other threads.
 
 Benchmarks
 ----------
