@@ -37,7 +37,7 @@ int namei(string_view path, namei_w_lock *w_lock, shared_ptr<entry_t> &result) {
             if (w_lock) {
                 w_lock->w_lock = unique_lock{parent->children_rwlock};
                 // Only empty directories can be removed, and that check will wait for w_lock, so don't need r_lock_prev
-                r_lock_prev.release();
+                r_lock_prev = {};
                 w_lock->parent = parent;
             } else {
                 r_lock_cur = shared_lock{parent->children_rwlock};

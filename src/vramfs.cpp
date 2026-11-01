@@ -162,8 +162,8 @@ static void chown_from_fuse_context(entry::entry_t &entry) {
     do {} while (0)
 
 static int vram_create(const char *path_, mode_t mode, fuse_file_info *fi) {
-    INCREMENT_ENTRY_COUNT_OR_RETURN();
     PREP_CREAT_MUT_ENTRY_OR_RETURN(/* .open handles existing files */ false);
+    INCREMENT_ENTRY_COUNT_OR_RETURN();
     entry_ = make_shared<entry::file_t>(mode);
     LN_NEW_ENTRY(entry_);
     fi->fh = reinterpret_cast<uint64_t>(new shared_ptr{dynamic_pointer_cast<entry::file_t>(std::move(entry_))});
@@ -171,16 +171,16 @@ static int vram_create(const char *path_, mode_t mode, fuse_file_info *fi) {
 }
 
 static int vram_mkdir(const char *path_, mode_t mode) {
-    INCREMENT_ENTRY_COUNT_OR_RETURN();
     PREP_CREAT_MUT_ENTRY_OR_RETURN(false);
+    INCREMENT_ENTRY_COUNT_OR_RETURN();
     entry_ = make_shared<entry::dir_t>(mode);
     LN_NEW_ENTRY(entry_);
     return 0;
 }
 
 static int vram_symlink(const char *target, const char *path_) {
-    INCREMENT_ENTRY_COUNT_OR_RETURN();
     PREP_CREAT_MUT_ENTRY_OR_RETURN(false);
+    INCREMENT_ENTRY_COUNT_OR_RETURN();
     entry_ = make_shared<entry::symlink_t>(target);
     LN_NEW_ENTRY(entry_);
     return 0;

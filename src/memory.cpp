@@ -33,6 +33,7 @@ shared_ptr<block> allocate() {
         lock_guard lock{pool_lock};
         if (!_pool_available.load(memory_order_relaxed)) return {};
         buffer = make_optional(pool.back());
+        pool.pop_back();
         _pool_available.fetch_sub(1, memory_order_relaxed);
     }
     return shared_ptr<block>{new block{*buffer}};
@@ -70,9 +71,13 @@ void block::read(size_t offset, size_t size, void *data) const {
             break;
         }
     }
-    copy_buffer(buffer.get().vk, download_buffer, offset, reinterpret_cast<uintptr_t>(mem) - reinterpret_cast<uintptr_t>(start), size);
-    memcpy(data, mem, size);
-    download_arena_locks[download_arena_i].store(false, memory_order_relaxed);
+    {
+        // Odd-numbered offsets work fine on my AMD RLX 6650 XT GPU. Vulkan does not require a multiple of 4 here.
+        // Only non-compliant unofficial drivers for Apple GPUs might require that.
+        copy_buffer(buffer.get().vk, download_buffer, offset, reinterpret_cast<uintptr_t>(mem) - reinterpret_cast<uintptr_t>(start), size);
+        memcpy(data, mem, size);
+    }
+    download_arena_locks[download_arena_i].store(false, memory_order_release);
 }
 
 void block::write(size_t offset, size_t size, const void *data) {

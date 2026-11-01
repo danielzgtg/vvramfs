@@ -34,8 +34,8 @@ void entry_t::mode(mode_t mode) {
 }
 
 void entry_t::chown(uid_t user, gid_t group) {
-    _user.store(user, memory_order_release);
-    _group.store(group, memory_order_release);
+    if (~user) _user.store(user, memory_order_release);
+    if (~group) _group.store(group, memory_order_release);
     ctime(util::time());
 }
 }
